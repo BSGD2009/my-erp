@@ -1,10 +1,11 @@
-# BoxERP — Session Progress Log
+# BoxERP — Project Progress Log
 
 ---
 
 ## Session 1 — Project Scaffold
 **Date:** 2026-02-28
 **Status:** ✅ Complete
+**Commit:** `bd8baca`
 
 ### What We Built
 
@@ -33,113 +34,199 @@
 
 ---
 
-### Issues / Incomplete Items
+## Session 2 — Prisma ORM + Database Schema
+**Date:** 2026-03-01
+**Status:** ✅ Complete
+**Commit:** `aa14889`
 
-- **No database schema yet** — PostgreSQL is running but has no tables. All ERP data models come in Session 2.
-- **No ORM** — currently using raw `pg` for the health check only. Prisma replaces this in Session 2.
-- **No authentication** — any browser can reach the backend. Login/JWT comes in Session 3.
-- **No frontend routing** — the app is a single static page. React Router added in Session 3.
-- **No UI framework** — styles are raw inline CSS for now. We'll add Tailwind CSS in Session 3.
-- **`.env` is not committed** — intentional (it contains secrets), but means a new developer must create it manually from `.env.example`.
+### What We Built
 
----
+**Prisma ORM**
+- Installed Prisma 5.22.0 (deliberately NOT v7 — v7 removed `url` from datasource config, breaking change)
+- `prisma/schema.prisma` — full 27-table ERP data model with 22 enums
+- `prisma/migrations/20260301043836_init/migration.sql` — auto-generated; all tables created in PostgreSQL
+- `src/prisma.ts` — PrismaClient singleton (prevents double-init during nodemon hot-reloads)
+- Updated `src/db.ts` to re-export prisma client (backward compatibility stub)
+- Updated `src/server.ts` health check to use `prisma.$queryRaw`
+- Updated `Dockerfile.dev`: added `apk add --no-cache openssl` (required for Prisma on Alpine Linux)
+- Updated `package.json`: Prisma 5.22.0, bcrypt, seed script config
 
-### Architecture Decisions Locked In
+**Database — 27 Tables**
 
-| Decision | Choice | Reason |
+| Group | Tables |
+|---|---|
+| Users & Access | User, Location |
+| Contacts | Customer, CustomerContact |
+| Operations | WorkCenter |
+| Procurement | Supplier, PurchaseOrder, PurchaseOrderItem |
+| Inventory | Material, MaterialInventory, MaterialReceipt, MaterialTransaction |
+| Products | ProductCategory, Product, BoxSpec, BlankSpec, BOMLine, Tooling |
+| Quoting | Quote, QuoteItem, QuoteItemBOMLine |
+| Orders | SalesOrder, SalesOrderItem |
+| Production | ProductionJob |
+| Fulfillment | Shipment, ShipmentItem, Invoice |
+
+**Key schema decisions**
+- BoxSpec = customer-facing dimensions/style; BlankSpec = full manufacturing recipe (CORRUGATED_BOX products only)
+- BlankSpec.materialId = procurement trigger (links finished box to board grade)
+- SalesOrder → multiple Shipments → multiple Invoices (supports multi-delivery per order)
+- Weighted average cost model on MaterialInventory (per material + location)
+- Multi-location inventory built in from day one
+
+**Seed data**
+- 2 users: `admin@boxerp.local / admin123` (ADMIN), `csr@boxerp.local / csr123` (CSR)
+- 2 locations, 6 work centers, 2 suppliers
+- 8 materials (board grades, ink, adhesive)
+- 3 customers + 4 contacts, 5 product categories
+- 2 sample products (1 corrugated box with full BoxSpec + BlankSpec + BOM; 1 packaging supply)
+
+### Problems Solved This Session
+
+| Problem | Root Cause | Fix |
 |---|---|---|
-| QB integration | CSV export | Works with Desktop and Online; no OAuth complexity |
-| Box specs | Full (L/W/H, style, flute, wall, print, coatings, die cuts, multi-item) | Schema supports full spec from day one |
-| BOM | Full (board, ink, adhesives, all conversion inputs) | Enables accurate job costing |
-| Scheduling | Work center assignment + target date per job | Balances visibility with simplicity |
-| Users at launch | 1–3; Admin + CSR roles | Minimal permission complexity for MVP |
-| Locations | 2–3; multi-location inventory from day one | All inventory records carry `location_id` |
-| Costing | Weighted average cost | Standard for manufacturers; simpler than FIFO |
-| Pricing | Catalog items + fully custom quotes | `products` table + custom `box_specs` per quote item |
+| Prisma failed to start | v7 removed `url` from datasource in schema.prisma | Downgraded to Prisma 5.22.0 |
+| Downgrade didn't take effect | `package-lock.json` was pinning v7 | Deleted lock file; Docker regenerated it fresh |
+| Old node_modules persisted across rebuilds | Docker anonymous volume survives `--build` | Ran `docker compose down -v` to wipe all volumes |
+| Backend crashed: libssl.so.1.1 not found | Alpine 3.19+ ships OpenSSL 3.x; Prisma defaulted to 1.1 binary | Added `apk add openssl` to Dockerfile + `binaryTargets = ["native", "linux-musl-openssl-3.0.x"]` to schema |
+
+### Verified Working
+- Migration applied: all 27 tables in PostgreSQL
+- Seed loaded: users, locations, work centers, suppliers, materials, customers, products
+- Health check: `db: connected` ✅
+- Committed and pushed to GitHub
 
 ---
 
-## Session 2 — Prisma Schema + Migrations
-**Status:** 🔲 Not started
+## Outstanding / Incomplete Items
+
+- **No authentication** — the app has no login. Anyone with the URL has full access.
+- **No API routes beyond `/api/health`** — the 27 tables exist but nothing reads/writes them yet.
+- **Frontend unchanged** — still just the Session 1 status dashboard. No ERP UI exists.
+- **No input validation** — future routes will need Zod or express-validator.
+- **bcrypt installed but auth not wired** — bcrypt hashes passwords in the seed; JWT middleware comes in Session 3.
+- **No global error handler** — Express has no catch-all error middleware yet.
+
+---
+
+## Session 3 — Auth (Next Up)
 
 ### Goal
-Add Prisma ORM and define the complete database schema. One command (`prisma migrate dev`) will create all tables automatically.
+Users must log in before accessing anything. A JWT token is issued on login and required on all subsequent API calls. The frontend shows a login page first; after a successful login it redirects to the dashboard.
 
 ### Exact Steps
 
-**1. Install Prisma in the backend**
+**Backend**
+
+1. **Install packages**
+   ```bash
+   docker compose exec backend npm install jsonwebtoken
+   docker compose exec backend npm install --save-dev @types/jsonwebtoken
+   ```
+
+2. **Add `JWT_SECRET` to `.env`**
+   ```
+   JWT_SECRET=change_this_to_a_long_random_string
+   ```
+   Also add the key (without value) to `.env.example`.
+
+3. **Create `src/middleware/auth.ts`**
+   - Reads `Authorization: Bearer <token>` header
+   - Verifies the JWT with `jsonwebtoken.verify()`
+   - Attaches the decoded user (`id`, `email`, `role`) to `req.user`
+   - Returns `401` if token is missing or invalid
+
+4. **Create `src/routes/auth.ts`** with two routes:
+   - `POST /api/auth/login` — accepts `{ email, password }`, looks up user in DB via Prisma, verifies bcrypt hash, returns signed JWT
+   - `GET /api/auth/me` — protected (uses auth middleware), returns current user from token
+
+5. **Mount auth router in `src/server.ts`**
+   ```typescript
+   import authRouter from './routes/auth';
+   app.use('/api/auth', authRouter);
+   ```
+
+**Frontend**
+
+6. **Install React Router**
+   ```bash
+   docker compose exec frontend npm install react-router-dom
+   docker compose exec frontend npm install --save-dev @types/react-router-dom
+   ```
+
+7. **Create `src/pages/LoginPage.tsx`**
+   - Email + password form
+   - Calls `POST /api/auth/login`
+   - On success: stores JWT in `localStorage`, redirects to `/`
+   - On failure: shows error message
+
+8. **Create `src/components/ProtectedRoute.tsx`**
+   - Checks `localStorage` for token
+   - If no token → redirects to `/login`
+   - If token present → renders children
+
+9. **Update `src/App.tsx`** to use React Router:
+   - `/login` → `LoginPage`
+   - `/` → dashboard (wrapped in `ProtectedRoute`)
+   - Add a Logout button that clears localStorage and redirects to `/login`
+
+**Testing checklist**
+- [ ] `POST /api/auth/login` with correct credentials returns a JWT
+- [ ] `POST /api/auth/login` with wrong password returns 401
+- [ ] `GET /api/auth/me` with valid token returns user object
+- [ ] `GET /api/auth/me` with no token returns 401
+- [ ] Frontend login form redirects to dashboard on success
+- [ ] Refreshing the page while logged in keeps you logged in (token in localStorage)
+- [ ] Logout clears token and sends you to login page
+
+### Start Session 3
 ```bash
-# In the VS Code terminal (project root)
-docker compose exec backend npm install prisma @prisma/client
-docker compose exec backend npx prisma init
+docker compose up -d
 ```
-
-**2. Replace `db.ts` with Prisma client**
-- Delete the raw `pg` connection pool
-- Add `prisma/schema.prisma` with all models
-- Export a shared `PrismaClient` instance
-
-**3. Define all models in `schema.prisma`**
-
-Tables to create (in dependency order):
-1. `Location` — plant, warehouse, satellite sites
-2. `User` — employees with roles (ADMIN, CSR)
-3. `Customer` — accounts with payment terms
-4. `WorkCenter` — machines/equipment at a location
-5. `Material` — raw material master (board, ink, adhesive, other)
-6. `Product` — catalog items with list prices
-7. `BoxSpec` — full box specification (attached to Product or QuoteItem)
-8. `Quote` — quote header (customer, location, status, valid_until)
-9. `QuoteItem` — line items on a quote (qty, unit_price, optional product ref)
-10. `BomLine` — materials per quote item (material + qty per 1,000 boxes)
-11. `SalesOrder` — converted from accepted quote
-12. `SalesOrderItem` — from quote items
-13. `ProductionJob` — one per sales order item
-14. `JobWorkCenterAssignment` — machine + target date + actual start/end
-15. `JobMaterialIssue` — actual materials consumed per job
-16. `MaterialInventory` — material + location + qty + avg_cost
-17. `FinishedGoodsInventory` — product + location + qty + avg_cost
-18. `InventoryTransaction` — audit log of every inventory move
-19. `PurchaseOrder` — procurement header
-20. `PurchaseOrderItem` — material + qty + unit cost
-21. `PoReceipt` — actual received quantities (triggers avg cost update)
-22. `Shipment` — shipped against a sales order
-23. `ShipmentItem` — qty shipped per order item
-24. `QbExportLog` — tracks CSV invoice exports to QuickBooks
-
-**4. Run the migration**
-```bash
-docker compose exec backend npx prisma migrate dev --name init
-```
-This creates all tables in PostgreSQL and generates the TypeScript client.
-
-**5. Seed the database**
-Create `prisma/seed.ts` with:
-- 2 locations (Main Plant, Warehouse)
-- 1 admin user (you)
-- 3–5 sample customers
-- 3–4 work centers (Corrugator, Flexo Press, Die Cutter, Stitcher)
-- 5–10 materials (board grades, ink colors, adhesive)
-- 3–5 catalog products (standard box sizes)
-
-**6. Update the health check**
-Replace the raw `pg` query in `server.ts` with a Prisma query so the health endpoint exercises the ORM.
-
-**7. Verify**
-- `docker compose exec backend npx prisma studio` opens a browser UI showing all tables
-- http://localhost:5173 still shows Database: connected
+Then say: **"Start Session 3 — auth."**
 
 ---
 
-## Sessions 3–10 Preview
+## Sessions 4–10 Preview
 
-| Session | Focus |
+| Session | Topic |
 |---|---|
-| 3 | Auth — login page, JWT middleware, protected routes, React Router |
-| 4 | Master data CRUD — Locations, Customers, Work Centers |
+| 4 | Master data CRUD — Locations, Customers, Work Centers (UI + API) |
 | 5 | Product catalog — SKU list, box spec editor, list pricing |
-| 6 | Quote builder — multi-item, full box spec form, BOM lines per item |
+| 6 | Quote builder — multi-item, full spec form, BOM lines per item |
 | 7 | Quote → Sales Order conversion |
-| 8 | Production jobs — create from order, assign to work center, status flow |
-| 9 | Inventory — multi-location stock, weighted avg cost, material issuance |
-| 10 | Shipments + QB CSV export — invoice generation, export log |
+| 8 | Production jobs — create from order, assign work center, status flow |
+| 9 | Multi-location inventory — weighted avg cost, material issuance |
+| 10 | Shipments + QuickBooks CSV export |
+
+---
+
+## Tech Reference
+
+| Item | Value |
+|---|---|
+| Frontend URL | http://localhost:5173 |
+| Backend URL | http://localhost:3001 |
+| Health check | http://localhost:3001/api/health |
+| Database | PostgreSQL 16, port 5432, db name: `erp_db` |
+| Prisma version | 5.22.0 — do NOT upgrade to v7 |
+| Seed admin login | admin@boxerp.local / admin123 |
+| Seed CSR login | csr@boxerp.local / csr123 |
+
+**Common commands**
+```bash
+# Start all services
+docker compose up -d
+
+# Watch backend logs
+docker compose logs -f backend
+
+# Re-run seed (safe — uses upsert)
+docker compose exec backend npx prisma db seed
+
+# Open Prisma Studio (visual DB browser)
+docker compose exec backend npx prisma studio
+
+# Full reset — DESTROYS all data, rebuilds from scratch
+docker compose down -v && docker compose up --build -d
+# After reset, re-run: docker compose exec backend npx prisma db seed
+```
