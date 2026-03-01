@@ -662,10 +662,13 @@ model SalesOrder {
   createdById       Int
   status            OrderStatus @default(OPEN)
   orderDate         DateTime    @default(now())
-  requestedShipDate DateTime?
-  notes             String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  requestedShipDate  DateTime?
+  customerPONumber   String?   // customer's own PO number for their records
+  customerPODate     DateTime? // date printed on the customer's PO document
+  customerPODocument String?   // file path or URL to uploaded PO document
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   quote     Quote?          @relation(fields: [quoteId],     references: [id])
   customer  Customer        @relation(fields: [customerId],  references: [id])

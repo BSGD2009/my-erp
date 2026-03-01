@@ -2,19 +2,20 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import prisma from './prisma';
+import authRouter from './routes/auth';
+import { requireAuth } from './middleware/auth';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
-// ── Middleware ──────────────────────────────────────────────────────────────
+// ── Middleware ───────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
 
-// ── Routes ──────────────────────────────────────────────────────────────────
-
-// Health check — verifies API and DB are reachable.
+// ── Public routes ────────────────────────────────────────────────────────────
+// Health check — useful for ops / Docker healthcheck; no auth required.
 app.get('/api/health', async (_req, res) => {
   let dbStatus = 'disconnected';
   try {
@@ -31,7 +32,15 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
-// ── Start server ────────────────────────────────────────────────────────────
+// Login is public — no auth middleware here
+app.use('/api/auth', authRouter);
+
+// ── Protected routes ─────────────────────────────────────────────────────────
+// Everything mounted under /api/protected requires a valid JWT.
+// Future sessions (master data, orders, etc.) mount their routers here.
+app.use('/api/protected', requireAuth);
+
+// ── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`BoxERP backend running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/api/health`);
