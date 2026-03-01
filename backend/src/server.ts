@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { testConnection } from './db';
+import prisma from './prisma';
 
 dotenv.config();
 
@@ -14,13 +14,18 @@ app.use(express.json());
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
-// Health check — the frontend landing page calls this to verify everything works.
-// Returns API status + DB connectivity.
+// Health check — verifies API and DB are reachable.
 app.get('/api/health', async (_req, res) => {
-  const dbConnected = await testConnection();
+  let dbStatus = 'disconnected';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    dbStatus = 'connected';
+  } catch {
+    // DB not ready yet
+  }
   res.json({
     status: 'ok',
-    db: dbConnected ? 'connected' : 'disconnected',
+    db: dbStatus,
     environment: process.env.NODE_ENV ?? 'unknown',
     timestamp: new Date().toISOString(),
   });
