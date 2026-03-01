@@ -1,0 +1,10 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies first (cached layer unless package.json changes)
+COPY package*.json ./
+RUN npm install
+
+# Source is mounted as a volume at runtime
+CMD ["npm", "run", "dev"]
