@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Layout } from '../components/Layout';
+import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
 import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle, STATUS_COLORS } from '../theme';
 
@@ -23,7 +24,8 @@ type Tab = 'materials' | 'finished-goods' | 'transfers';
 
 export function InventoryPage() {
   const navigate = useNavigate();
-  const [activeTab, setTab] = useState<Tab>('materials');
+  const location = useLocation();
+  const [activeTab, setTab] = useState<Tab>(location.pathname === '/transfers' ? 'transfers' : 'materials');
   const [msg, setMsg]       = useState<{ text: string; type: 'success'|'error' } | null>(null);
 
   function flash(text: string, type: 'success'|'error' = 'success') {
@@ -170,15 +172,18 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
 }
 
 // ─── Transfers ────────────────────────────────────────────────────────────────
+const XFER_EMPTY = { transferType: 'material', materialId: '', productId: '', fromLocationId: '', toLocationId: '', quantity: '', notes: '', status: 'PENDING' };
+
 function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => void }) {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [showForm, setShowForm]   = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [locations, setLocations] = useState<Location[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [products,  setProducts]  = useState<Product[]>([]);
   const [saving, setSaving]       = useState(false);
-  const [f, setF] = useState({ transferType: 'material', materialId: '', productId: '', fromLocationId: '', toLocationId: '', quantity: '', notes: '', status: 'PENDING' });
+  const [saveErr, setSaveErr]     = useState('');
+  const [f, setF]                 = useState(XFER_EMPTY);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -190,15 +195,18 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    api.get<{ data: Location[] }>('/protected/locations').then(r => setLocations(r.data)).catch(() => {});
+    api.get<Location[]>('/protected/locations').then(setLocations).catch(() => {});
     api.get<{ data: Material[] }>('/protected/materials?limit=500').then(r => setMaterials(r.data)).catch(() => {});
     api.get<{ data: Product[]  }>('/protected/products?limit=500').then(r => setProducts(r.data)).catch(() => {});
   }, []);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>) => setF(p => ({ ...p, [k]: e.target.value }));
 
+  function openNew() { setF(XFER_EMPTY); setSaveErr(''); setDrawerOpen(true); }
+
   async function createTransfer() {
-    setSaving(true);
+    if (!f.fromLocationId || !f.toLocationId || !f.quantity) { setSaveErr('From location, to location, and quantity are required'); return; }
+    setSaving(true); setSaveErr('');
     try {
       const body: Record<string, unknown> = {
         fromLocationId: parseInt(f.fromLocationId),
@@ -211,10 +219,9 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
       if (f.notes) body.notes = f.notes;
       await api.post('/protected/inventory/transfers', body);
       await load();
-      setShowForm(false);
-      setF({ transferType:'material', materialId:'', productId:'', fromLocationId:'', toLocationId:'', quantity:'', notes:'', status:'PENDING' });
+      setDrawerOpen(false);
       flash('Transfer created.');
-    } catch (e: any) { flash(e.message, 'error'); } finally { setSaving(false); }
+    } catch (e: any) { setSaveErr(e.message); } finally { setSaving(false); }
   }
 
   async function completeTransfer(id: number) {
@@ -237,77 +244,11 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'1rem' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
         <span style={{ fontSize:'0.85rem', color:c.textMuted }}>{transfers.length} transfer{transfers.length !== 1 ? 's' : ''} on record</span>
-        <button style={btnPrimary} onClick={() => setShowForm(s => !s)}>+ New Transfer</button>
+        <button style={btnPrimary} onClick={openNew}>+ New Transfer</button>
       </div>
 
-      {/* New transfer form */}
-      {showForm && (
-        <div style={{ ...cardStyle, padding:'1.5rem', marginBottom:'1.5rem', maxWidth:640 }}>
-          <h3 style={{ margin:'0 0 1.25rem', fontSize:'0.95rem', fontWeight:600 }}>New Inventory Transfer</h3>
-
-          <div style={{ display:'flex', gap:12, marginBottom:'1rem' }}>
-            {[['material','Raw Material'],['product','Finished Good']].map(([v,l]) => (
-              <label key={v} style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.85rem', color:c.textLabel, cursor:'pointer' }}>
-                <input type="radio" name="ttype" value={v} checked={f.transferType===v} onChange={set('transferType')} /> {l}
-              </label>
-            ))}
-          </div>
-
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.85rem 1.25rem' }}>
-            {f.transferType === 'material' ? (
-              <Field label="Material *">
-                <select style={{ ...inputStyle, cursor:'pointer' }} value={f.materialId} onChange={set('materialId')}>
-                  <option value="">— Select —</option>
-                  {materials.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
-                </select>
-              </Field>
-            ) : (
-              <Field label="Product *">
-                <select style={{ ...inputStyle, cursor:'pointer' }} value={f.productId} onChange={set('productId')}>
-                  <option value="">— Select —</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
-                </select>
-              </Field>
-            )}
-            <Field label="Quantity *"><input style={inputStyle} type="number" step="0.0001" value={f.quantity} onChange={set('quantity')} /></Field>
-            <Field label="From Location *">
-              <select style={{ ...inputStyle, cursor:'pointer' }} value={f.fromLocationId} onChange={set('fromLocationId')}>
-                <option value="">— Select —</option>
-                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </Field>
-            <Field label="To Location *">
-              <select style={{ ...inputStyle, cursor:'pointer' }} value={f.toLocationId} onChange={set('toLocationId')}>
-                <option value="">— Select —</option>
-                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </Field>
-          </div>
-
-          <div style={{ display:'flex', gap:12, marginBottom:'1rem' }}>
-            {[['PENDING','Save as Pending'],['COMPLETED','Complete Now']].map(([v,l]) => (
-              <label key={v} style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.85rem', color:c.textLabel, cursor:'pointer' }}>
-                <input type="radio" name="tstatus" value={v} checked={f.status===v} onChange={set('status')} /> {l}
-              </label>
-            ))}
-          </div>
-          {f.status === 'COMPLETED' && (
-            <div style={{ background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:6, padding:'0.65rem 0.85rem', marginBottom:'1rem', fontSize:'0.82rem', color:'#f59e0b' }}>
-              Completing immediately will adjust inventory balances at both locations.
-            </div>
-          )}
-
-          <Field label="Notes"><textarea style={{ ...inputStyle, height:56, resize:'vertical' }} value={f.notes} onChange={set('notes')} /></Field>
-          <div style={{ display:'flex', gap:8 }}>
-            <button style={btnPrimary} onClick={createTransfer} disabled={saving}>{saving ? 'Creating…' : 'Create Transfer'}</button>
-            <button style={btnSecondary} onClick={() => setShowForm(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {/* Transfers list */}
       {loading ? (
         <div style={{ color:c.textMuted, textAlign:'center', padding:'3rem' }}>Loading…</div>
       ) : transfers.length === 0 ? (
@@ -354,6 +295,81 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
           </table>
         </div>
       )}
+
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="New Inventory Transfer">
+        {saveErr && <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', borderRadius:8, padding:'0.65rem 1rem', marginBottom:'1rem', fontSize:'0.85rem', color:c.danger }}>{saveErr}</div>}
+
+        <div style={{ marginBottom:'1rem' }}>
+          <label style={labelStyle}>Transfer Type</label>
+          <div style={{ display:'flex', gap:12 }}>
+            {[['material','Raw Material'],['product','Finished Good']].map(([v,l]) => (
+              <label key={v} style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.85rem', color:c.textLabel, cursor:'pointer' }}>
+                <input type="radio" name="ttype" value={v} checked={f.transferType===v} onChange={set('transferType')} /> {l}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {f.transferType === 'material' ? (
+          <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Material *</label>
+            <select style={{ ...inputStyle, cursor:'pointer' }} value={f.materialId} onChange={set('materialId')}>
+              <option value="">— Select —</option>
+              {materials.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Product *</label>
+            <select style={{ ...inputStyle, cursor:'pointer' }} value={f.productId} onChange={set('productId')}>
+              <option value="">— Select —</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
+            </select>
+          </div>
+        )}
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 1rem' }}>
+          <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>From Location *</label>
+            <select style={{ ...inputStyle, cursor:'pointer' }} value={f.fromLocationId} onChange={set('fromLocationId')}>
+              <option value="">— Select —</option>
+              {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>To Location *</label>
+            <select style={{ ...inputStyle, cursor:'pointer' }} value={f.toLocationId} onChange={set('toLocationId')}>
+              <option value="">— Select —</option>
+              {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Quantity *</label>
+          <input style={inputStyle} type="number" step="0.0001" value={f.quantity} onChange={set('quantity')} />
+        </div>
+
+        <div style={{ marginBottom:'1rem' }}>
+          <label style={labelStyle}>Apply</label>
+          <div style={{ display:'flex', gap:12 }}>
+            {[['PENDING','Save as Pending'],['COMPLETED','Complete Now']].map(([v,l]) => (
+              <label key={v} style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.85rem', color:c.textLabel, cursor:'pointer' }}>
+                <input type="radio" name="tstatus" value={v} checked={f.status===v} onChange={set('status')} /> {l}
+              </label>
+            ))}
+          </div>
+          {f.status === 'COMPLETED' && (
+            <div style={{ background:'rgba(245,158,11,0.1)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:6, padding:'0.65rem 0.85rem', marginTop:'0.5rem', fontSize:'0.82rem', color:'#f59e0b' }}>
+              Completing immediately will adjust inventory balances at both locations.
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginBottom:'1.25rem' }}><label style={labelStyle}>Notes</label>
+          <textarea style={{ ...inputStyle, height:56, resize:'vertical' }} value={f.notes} onChange={set('notes')} />
+        </div>
+
+        <div style={{ display:'flex', gap:8 }}>
+          <button style={btnPrimary} onClick={createTransfer} disabled={saving}>{saving ? 'Creating…' : 'Create Transfer'}</button>
+          <button style={btnSecondary} onClick={() => setDrawerOpen(false)}>Cancel</button>
+        </div>
+      </Drawer>
     </div>
   );
 }
