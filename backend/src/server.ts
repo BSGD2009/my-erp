@@ -5,13 +5,16 @@ import prisma from './prisma';
 import { requireAuth } from './middleware/auth';
 
 // ── Route imports ────────────────────────────────────────────────────────────
-import authRouter            from './routes/auth';
-import customersRouter       from './routes/customers';
-import suppliersRouter       from './routes/suppliers';
-import locationsRouter       from './routes/locations';
-import workCentersRouter     from './routes/workCenters';
-import materialsRouter       from './routes/materials';
+import authRouter              from './routes/auth';
+import customersRouter         from './routes/customers';
+import suppliersRouter         from './routes/suppliers';
+import locationsRouter         from './routes/locations';
+import workCentersRouter       from './routes/workCenters';
+import materialsRouter         from './routes/materials';
 import productCategoriesRouter from './routes/productCategories';
+import productsRouter          from './routes/products';
+import toolingRouter           from './routes/tooling';
+import inventoryRouter         from './routes/inventory';
 
 dotenv.config();
 
@@ -43,12 +46,17 @@ app.use('/api/auth', authRouter);
 app.use('/api/protected', requireAuth);
 
 // Master data
-app.use('/api/protected/customers',        customersRouter);
-app.use('/api/protected/suppliers',        suppliersRouter);
-app.use('/api/protected/locations',        locationsRouter);
-app.use('/api/protected/work-centers',     workCentersRouter);
-app.use('/api/protected/materials',        materialsRouter);
+app.use('/api/protected/customers',          customersRouter);
+app.use('/api/protected/suppliers',          suppliersRouter);
+app.use('/api/protected/locations',          locationsRouter);
+app.use('/api/protected/work-centers',       workCentersRouter);
+app.use('/api/protected/materials',          materialsRouter);
 app.use('/api/protected/product-categories', productCategoriesRouter);
+
+// Products & catalog
+app.use('/api/protected/products',           productsRouter);
+app.use('/api/protected/tooling',            toolingRouter);
+app.use('/api/protected/inventory',          inventoryRouter);
 
 // ── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
