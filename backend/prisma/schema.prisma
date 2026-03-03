@@ -1,8 +1,8 @@
 // BoxERP — Prisma Schema
-// Session 4 updates: MaterialVariant, ProductVariant, ProductSpec,
-//   ProductionConsumption, FinishedGoodsInventory, InventoryTransfer.
-//   Plus additive columns on BlankSpec, ProductionJob, Customer,
-//   SalesOrder, SalesOrderItem, Shipment, ShipmentItem, QuoteItem.
+// Session 4 Review: 7 new tables (PaymentTerm, ShipToAddress, MaterialType,
+//   WorkCenterType, Equipment, Operation, EquipmentCapability, SupplierContact).
+//   Replaced MaterialType + WorkCenterType enums with admin-managed lookup tables.
+//   Split addresses, payment terms FK, equipment tracking, operations catalog.
 
 generator client {
   provider      = "prisma-client-js"
@@ -24,29 +24,22 @@ enum Role {
 }
 
 enum ContactType {
+  MAIN
   BUYER
+  SALES_REP
+  PURCHASING
   AP
   RECEIVING
-  OTHER
-}
-
-enum WorkCenterType {
-  PRINTING
-  SLITTING_SCORING
-  DIE_CUTTING
-  GLUING
-  BUNDLING_STRAPPING
   SHIPPING
   OTHER
 }
 
-enum MaterialType {
-  BOARD
-  INK
-  ADHESIVE
-  TAPE
-  STAPLE
-  COATING
+enum LocationType {
+  OWN_PLANT
+  OWN_WAREHOUSE
+  OFFICE
+  CUSTOMER
+  SUPPLIER
   OTHER
 }
 
@@ -139,7 +132,6 @@ enum JobStatus {
   CANCELLED
 }
 
-// What is blocking this job from being scheduled / run.
 enum JobReadiness {
   WAITING_SHEETS
   WAITING_TOOLING
@@ -155,7 +147,6 @@ enum ShipmentStatus {
   VOIDED
 }
 
-// Internal two-stage shipment workflow (warehouse entry → CSR confirmation → shipped).
 enum ShipmentStage {
   DRAFT
   WAREHOUSE_ENTERED
@@ -164,7 +155,6 @@ enum ShipmentStage {
   DELIVERED
 }
 
-// Why the confirmed qty differs from the suggested qty on a shipment.
 enum VarianceReason {
   RECOUNT
   DAMAGE
@@ -227,6 +217,46 @@ enum ToolCondition {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LOOKUP TABLES (admin-managed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PaymentTerm {
+  id              Int      @id @default(autoincrement())
+  termCode        String   @unique
+  termName        String
+  discountPercent Decimal  @default(0) @db.Decimal(5, 2)
+  discountDays    Int      @default(0)
+  netDays         Int
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+
+  customers Customer[]
+  suppliers Supplier[]
+}
+
+model MaterialType {
+  id        Int      @id @default(autoincrement())
+  typeKey   String   @unique
+  typeName  String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+
+  materials Material[]
+}
+
+model WorkCenterType {
+  id        Int      @id @default(autoincrement())
+  typeKey   String   @unique
+  typeName  String
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+
+  workCenters WorkCenter[]
+  equipment   Equipment[]
+  operations  Operation[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // USER MANAGEMENT
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -255,12 +285,20 @@ model User {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Location {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique
-  address   String?
-  isDefault Boolean  @default(false)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id           Int          @id @default(autoincrement())
+  name         String       @unique
+  locationType LocationType @default(OWN_PLANT)
+  isRegistered Boolean      @default(false)
+  isDefault    Boolean      @default(false)
+  street       String?
+  city         String?
+  state        String?
+  zip          String?
+  country      String?      @default("US")
+  phone        String?
+  email        String?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
 
   inventory              MaterialInventory[]
   receipts               MaterialReceipt[]
@@ -272,54 +310,89 @@ model Location {
   productionConsumptions ProductionConsumption[]
   transfersFrom          InventoryTransfer[]      @relation("TransferFrom")
   transfersTo            InventoryTransfer[]      @relation("TransferTo")
+  equipment              Equipment[]
+  workCenters            WorkCenter[]
 }
 
 model Customer {
-  id                    Int      @id @default(autoincrement())
-  code                  String   @unique
-  name                  String
-  contactName           String?
-  email                 String?
-  phone                 String?
-  address               String?
-  billingAddress        String?
-  paymentTerms          String?
-  creditLimit           Decimal? @db.Decimal(12, 2)
-  creditHold            Boolean  @default(false)
-  taxExempt             Boolean  @default(false)
-  taxExemptId           String?
-  salesRepId            Int?
-  notes                 String?
-  // Shipment tolerance defaults — can be overridden at order or order-item level.
-  defaultOverTolerance  Decimal  @default(10.0) @db.Decimal(6, 2)
-  defaultUnderTolerance Decimal  @default(10.0) @db.Decimal(6, 2)
-  isActive              Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                       Int      @id @default(autoincrement())
+  code                     String   @unique
+  name                     String
+  accountNumber            String?
+  taxId                    String?
+  resaleCertificateNumber  String?
+  street                   String?
+  city                     String?
+  state                    String?
+  zip                      String?
+  country                  String?  @default("US")
+  billingStreet            String?
+  billingCity              String?
+  billingState             String?
+  billingZip               String?
+  billingCountry           String?  @default("US")
+  paymentTermId            Int?
+  creditLimit              Decimal? @db.Decimal(12, 2)
+  creditHold               Boolean  @default(false)
+  taxExempt                Boolean  @default(false)
+  taxExemptId              String?
+  defaultSalesRepId        Int?
+  notes                    String?
+  defaultOverTolerance     Decimal  @default(10.0) @db.Decimal(6, 2)
+  defaultUnderTolerance    Decimal  @default(10.0) @db.Decimal(6, 2)
+  isActive                 Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 
-  salesRep  User?             @relation("CustomerSalesRep", fields: [salesRepId], references: [id])
-  contacts  CustomerContact[]
-  quotes    Quote[]
-  orders    SalesOrder[]
-  invoices  Invoice[]
-  tooling   Tooling[]
+  paymentTerm    PaymentTerm?      @relation(fields: [paymentTermId], references: [id])
+  defaultSalesRep User?            @relation("CustomerSalesRep", fields: [defaultSalesRepId], references: [id])
+  contacts       CustomerContact[]
+  shipToAddresses ShipToAddress[]
+  quotes         Quote[]
+  orders         SalesOrder[]
+  invoices       Invoice[]
+  tooling        Tooling[]
 
-  @@index([salesRepId])
+  @@index([defaultSalesRepId])
+  @@index([paymentTermId])
 }
 
-// Multiple contacts per customer (buyer, AP, receiving dock, etc.)
 model CustomerContact {
-  id          Int         @id @default(autoincrement())
-  customerId  Int
-  name        String
-  title       String?
-  email       String?
-  phone       String?
-  contactType ContactType
-  isPrimary   Boolean     @default(false)
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id                   Int         @id @default(autoincrement())
+  customerId           Int
+  name                 String
+  title                String?
+  email                String?
+  phone                String?
+  contactType          ContactType
+  isPrimary            Boolean     @default(false)
+  invoiceDistribution  Boolean     @default(false)
+  isActive             Boolean     @default(true)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+}
+
+model ShipToAddress {
+  id                   Int      @id @default(autoincrement())
+  customerId           Int
+  locationName         String
+  street               String?
+  city                 String?
+  state                String?
+  zip                  String?
+  country              String?  @default("US")
+  contactName          String?
+  contactPhone         String?
+  contactEmail         String?
+  isDefault            Boolean  @default(false)
+  deliveryInstructions String?
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id])
 
@@ -327,32 +400,133 @@ model CustomerContact {
 }
 
 model WorkCenter {
-  id          Int            @id @default(autoincrement())
-  name        String         @unique
-  type        WorkCenterType
-  description String?
-  isActive    Boolean        @default(true)
-  createdAt   DateTime       @default(now())
+  id               Int      @id @default(autoincrement())
+  name             String   @unique
+  workCenterTypeId Int?
+  description      String?
+  locationId       Int?
+  equipmentId      Int?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
 
-  jobs ProductionJob[]
+  workCenterType WorkCenterType? @relation(fields: [workCenterTypeId], references: [id])
+  location       Location?       @relation(fields: [locationId], references: [id])
+  equipment      Equipment?      @relation(fields: [equipmentId], references: [id])
+  jobs           ProductionJob[]
+
+  @@index([workCenterTypeId])
+  @@index([locationId])
 }
 
 model Supplier {
-  id           Int      @id @default(autoincrement())
-  code         String   @unique
-  name         String
-  contactName  String?
-  email        String?
-  phone        String?
-  address      String?
-  paymentTerms String?
-  leadTimeDays Int?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  name            String
+  accountNumber   String?
+  taxId           String?
+  is1099Eligible  Boolean  @default(false)
+  name1099        String?
+  street          String?
+  city            String?
+  state           String?
+  zip             String?
+  country         String?  @default("US")
+  paymentTermId   Int?
+  creditLimit     Decimal? @db.Decimal(12, 2)
+  w9OnFile        Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  materials      Material[]
+  paymentTerm    PaymentTerm?      @relation(fields: [paymentTermId], references: [id])
+  contacts       SupplierContact[]
   purchaseOrders PurchaseOrder[]
+  partsForEquipment Equipment[]
+}
+
+model SupplierContact {
+  id                  Int         @id @default(autoincrement())
+  supplierId          Int
+  name                String
+  title               String?
+  email               String?
+  phone               String?
+  contactType         ContactType
+  isPrimary           Boolean     @default(false)
+  invoiceDistribution Boolean     @default(false)
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EQUIPMENT & OPERATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Equipment {
+  id                  Int      @id @default(autoincrement())
+  name                String
+  equipmentTypeId     Int
+  locationId          Int
+  manufacturer        String?
+  modelNumber         String?
+  serialNumber        String?
+  yearOfManufacture   Int?
+  maxSheetWidth       Decimal? @db.Decimal(8, 3)
+  maxSheetLength      Decimal? @db.Decimal(8, 3)
+  minSheetWidth       Decimal? @db.Decimal(8, 3)
+  minSheetLength      Decimal? @db.Decimal(8, 3)
+  maxSpeed            Decimal? @db.Decimal(10, 2)
+  purchaseDate        DateTime?
+  purchasePrice       Decimal? @db.Decimal(12, 2)
+  warrantyExpiry      DateTime?
+  lastServiceDate     DateTime?
+  nextServiceDue      DateTime?
+  assetTagId          String?
+  partsSupplierId     Int?
+  notes               String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  equipmentType  WorkCenterType       @relation(fields: [equipmentTypeId], references: [id])
+  location       Location             @relation(fields: [locationId], references: [id])
+  partsSupplier  Supplier?            @relation(fields: [partsSupplierId], references: [id])
+  capabilities   EquipmentCapability[]
+  workCenters    WorkCenter[]
+
+  @@index([equipmentTypeId])
+  @@index([locationId])
+  @@index([partsSupplierId])
+}
+
+model Operation {
+  id                     Int      @id @default(autoincrement())
+  operationKey           String   @unique
+  operationName          String
+  defaultEquipmentTypeId Int?
+  isActive               Boolean  @default(true)
+  sortOrder              Int      @default(0)
+
+  defaultEquipmentType WorkCenterType?      @relation(fields: [defaultEquipmentTypeId], references: [id])
+  capabilities         EquipmentCapability[]
+}
+
+model EquipmentCapability {
+  id          Int      @id @default(autoincrement())
+  equipmentId Int
+  operationId Int
+  maxSpeed    Decimal? @db.Decimal(10, 2)
+  notes       String?
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  operation Operation @relation(fields: [operationId], references: [id])
+
+  @@unique([equipmentId, operationId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,20 +534,20 @@ model Supplier {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Material {
-  id            Int          @id @default(autoincrement())
-  code          String       @unique
-  name          String
-  type          MaterialType
-  unitOfMeasure String
-  supplierId    Int?         // preferred / default supplier
-  reorderPoint  Decimal?     @db.Decimal(12, 4)
-  reorderQty    Decimal?     @db.Decimal(12, 4)
-  leadTimeDays  Int?
-  isActive      Boolean      @default(true)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id             Int      @id @default(autoincrement())
+  code           String   @unique
+  name           String
+  materialTypeId Int?
+  unitOfMeasure  String
+  defaultCost    Decimal? @db.Decimal(12, 4)
+  reorderPoint   Decimal? @db.Decimal(12, 4)
+  reorderQty     Decimal? @db.Decimal(12, 4)
+  leadTimeDays   Int?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  supplier               Supplier?              @relation(fields: [supplierId], references: [id])
+  materialType           MaterialType?          @relation(fields: [materialTypeId], references: [id])
   inventory              MaterialInventory[]
   receipts               MaterialReceipt[]
   transactions           MaterialTransaction[]
@@ -385,21 +559,17 @@ model Material {
   productionConsumptions ProductionConsumption[]
   inventoryTransfers     InventoryTransfer[]
 
-  @@index([type])
-  @@index([supplierId])
+  @@index([materialTypeId])
 }
 
-// Specific cut widths, roll widths, or sheet sizes for a raw material.
-// Example: same board grade ordered as 50" roll or 42" roll — separate variants.
-// BlankSpec.materialVariantId specifies which variant to use for procurement.
 model MaterialVariant {
   id            Int      @id @default(autoincrement())
   materialId    Int
   variantCode   String   @unique
   description   String?
-  rollWidth     Decimal? @db.Decimal(8, 3) // inches — for roll stock
-  sheetLength   Decimal? @db.Decimal(8, 3) // inches — for pre-cut sheets
-  sheetWidth    Decimal? @db.Decimal(8, 3) // inches — for pre-cut sheets
+  rollWidth     Decimal? @db.Decimal(8, 3)
+  sheetLength   Decimal? @db.Decimal(8, 3)
+  sheetWidth    Decimal? @db.Decimal(8, 3)
   unitOfMeasure String?
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
@@ -413,7 +583,6 @@ model MaterialVariant {
   @@index([materialId])
 }
 
-// One row per material + location. Tracks on-hand qty and weighted average cost.
 model MaterialInventory {
   id         Int      @id @default(autoincrement())
   materialId Int
@@ -429,12 +598,11 @@ model MaterialInventory {
   @@index([locationId])
 }
 
-// One row per delivery. Triggers weighted average cost recalculation on MaterialInventory.
 model MaterialReceipt {
   id                  Int      @id @default(autoincrement())
   materialId          Int
   locationId          Int
-  purchaseOrderItemId Int?     // links to PO line; system auto-updates PO quantityReceived
+  purchaseOrderItemId Int?
   quantity            Decimal  @db.Decimal(14, 4)
   unitCost            Decimal  @db.Decimal(12, 4)
   vendorName          String?
@@ -450,15 +618,14 @@ model MaterialReceipt {
   @@index([purchaseOrderItemId])
 }
 
-// Append-only ledger of every inventory movement. Never deleted — full audit trail.
 model MaterialTransaction {
   id            Int             @id @default(autoincrement())
   materialId    Int
   locationId    Int
   type          TransactionType
-  quantity      Decimal         @db.Decimal(14, 4) // positive = in, negative = out
-  referenceType String?         // e.g. "PurchaseOrder", "ProductionJob"
-  referenceId   Int?            // ID of the related record
+  quantity      Decimal         @db.Decimal(14, 4)
+  referenceType String?
+  referenceId   Int?
   notes         String?
   createdById   Int
   createdAt     DateTime        @default(now())
@@ -477,7 +644,7 @@ model MaterialTransaction {
 
 model PurchaseOrder {
   id                   Int      @id @default(autoincrement())
-  poNumber             String   @unique // e.g. "PO-2024-001" — generated by app
+  poNumber             String   @unique
   supplierId           Int
   createdById          Int
   status               PoStatus @default(DRAFT)
@@ -500,7 +667,7 @@ model PurchaseOrderItem {
   materialId       Int
   lineNumber       Int
   quantityOrdered  Decimal @db.Decimal(14, 4)
-  quantityReceived Decimal @default(0) @db.Decimal(14, 4) // updated when receipts are linked
+  quantityReceived Decimal @default(0) @db.Decimal(14, 4)
   unitCost         Decimal @db.Decimal(12, 4)
   notes            String?
 
@@ -516,7 +683,6 @@ model PurchaseOrderItem {
 // PRODUCTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Hierarchical product categories. parentId null = top-level.
 model ProductCategory {
   id          Int      @id @default(autoincrement())
   name        String
@@ -541,15 +707,12 @@ model Product {
   description String?
   productType ProductType
   categoryId  Int?
-  isCustom    Boolean     @default(false) // false = standard catalog; true = custom/one-off
+  isCustom    Boolean     @default(false)
   listPrice   Decimal?    @db.Decimal(12, 4)
   isActive    Boolean     @default(true)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  // BoxSpec and BlankSpec only apply when productType = CORRUGATED_BOX.
-  // ProductVariant and ProductSpec apply based on productType rules.
-  // Enforced at the application layer.
   category               ProductCategory?       @relation(fields: [categoryId], references: [id])
   boxSpec                BoxSpec?               @relation("ProductBoxSpec")
   blankSpec              BlankSpec?             @relation("ProductBlankSpec")
@@ -565,16 +728,14 @@ model Product {
   @@index([categoryId])
 }
 
-// Customer-facing dimensions and visual features.
-// Only created for CORRUGATED_BOX products.
 model BoxSpec {
   id                Int      @id @default(autoincrement())
-  productId         Int?     @unique // catalog item spec — one or the other, never both
-  quoteItemId       Int?     @unique // custom quote line spec
+  productId         Int?     @unique
+  quoteItemId       Int?     @unique
   lengthInches      Decimal  @db.Decimal(8, 3)
   widthInches       Decimal  @db.Decimal(8, 3)
   heightInches      Decimal  @db.Decimal(8, 3)
-  outsideDimensions Boolean  @default(false) // true if customer specified outside dims
+  outsideDimensions Boolean  @default(false)
   style             BoxStyle @default(RSC)
   hasDieCut         Boolean  @default(false)
   hasPerforations   Boolean  @default(false)
@@ -584,65 +745,51 @@ model BoxSpec {
   quoteItem QuoteItem? @relation("QuoteItemBoxSpec", fields: [quoteItemId], references: [id])
 }
 
-// Complete manufacturing recipe for a box.
-// Procurement trigger: SalesOrderItem → Product → BlankSpec → materialId → PO suggestion.
-// PO qty formula: standard = qty ordered; multi-out = CEIL(qty ÷ outsPerSheet);
-//   multi-sheet = qty × sheetsPerBox.
-// Only created for CORRUGATED_BOX products.
 model BlankSpec {
   id          Int    @id @default(autoincrement())
-  productId   Int?   @unique // catalog item — one or the other, never both
-  quoteItemId Int?   @unique // custom quote line
-  materialId  Int    // the specific pre-cut sheet material to order
+  productId   Int?   @unique
+  quoteItemId Int?   @unique
+  materialId  Int
 
-  // Multi-out / multi-sheet layout
-  outsPerSheet      Int      @default(1)           // boxes per sheet (1-out, 2-out, 4-out, etc.)
-  sheetsPerBox      Decimal  @default(1.0) @db.Decimal(8, 4) // sheets per box (for oversize blanks)
-  sheetLengthInches Decimal? @db.Decimal(8, 3)     // actual purchased sheet length
-  sheetWidthInches  Decimal? @db.Decimal(8, 3)     // actual purchased sheet width
-  layoutNotes       String?                         // die cut layout description
-  rollWidthRequired Decimal? @db.Decimal(8, 3)     // minimum roll width needed from supplier
+  outsPerSheet      Int      @default(1)
+  sheetsPerBox      Decimal  @default(1.0) @db.Decimal(8, 4)
+  sheetLengthInches Decimal? @db.Decimal(8, 3)
+  sheetWidthInches  Decimal? @db.Decimal(8, 3)
+  layoutNotes       String?
+  rollWidthRequired Decimal? @db.Decimal(8, 3)
 
-  // Tooling references
-  requiredDieId     Int?     // FK → Tooling (die required for this blank)
-  requiredPlateIds  String?  // comma-separated plate reference numbers
-  materialVariantId Int?     // FK → MaterialVariant (specific roll width / sheet size to order)
+  requiredDieId     Int?
+  requiredPlateIds  String?
+  materialVariantId Int?
 
-  // Blank dimensions
   blankLengthInches Decimal        @db.Decimal(8, 3)
   blankWidthInches  Decimal        @db.Decimal(8, 3)
   grainDirection    GrainDirection
 
-  // Board spec
-  boardGrade String   // free text: "32 ECT", "44 ECT", "200#", "275#"
+  boardGrade String
   flute      Flute
   wallType   WallType
 
-  // Scoring
   scoreCount     Int
-  scorePositions String // JSON array: [{"position":1,"measurement":12.5},...]
+  scorePositions String
 
-  // Slots
   slotDepth Decimal? @db.Decimal(8, 3)
   slotWidth Decimal? @db.Decimal(8, 3)
 
-  // Special cuts and adders
   specialCuts String?
   trimAmount  Decimal? @db.Decimal(8, 3)
   jointType   JointType
 
-  // Print spec
   printType    PrintType   @default(NONE)
   printColors  Int         @default(0)
-  inkTypes     String?     // description of ink colors/types
-  plateNumbers String?     // comma-separated plate reference numbers
+  inkTypes     String?
+  plateNumbers String?
   coating      CoatingType @default(NONE)
 
-  // Pallet configuration
-  bundleCount     Int? // units per bundle
-  tieHigh         Int? // bundles high per pallet layer
-  tierWide        Int? // bundles wide per pallet layer
-  palletsPerOrder Int? // estimated pallets for a standard order qty
+  bundleCount     Int?
+  tieHigh         Int?
+  tierWide        Int?
+  palletsPerOrder Int?
 
   notes     String?
   createdAt DateTime @default(now())
@@ -655,13 +802,11 @@ model BlankSpec {
   materialVariant MaterialVariant? @relation(fields: [materialVariantId], references: [id])
 }
 
-// Standard bill of materials for a catalog product (ink, adhesive, etc.)
-// Board/sheet material is captured via BlankSpec.materialId.
 model BOMLine {
   id            Int     @id @default(autoincrement())
   productId     Int
   materialId    Int
-  quantityPer   Decimal @db.Decimal(14, 6) // qty of material per 1 finished unit
+  quantityPer   Decimal @db.Decimal(14, 6)
   unitOfMeasure String
 
   product  Product  @relation(fields: [productId],  references: [id])
@@ -670,15 +815,14 @@ model BOMLine {
   @@unique([productId, materialId])
 }
 
-// Dies, plates, and other tooling. Can be plant-owned or customer-owned.
 model Tooling {
   id          Int           @id @default(autoincrement())
-  toolNumber  String        @unique // e.g. "DIE-0042", "PLT-0017"
+  toolNumber  String        @unique
   type        ToolType
   description String?
-  customerId  Int?          // null = plant-owned
+  customerId  Int?
   condition   ToolCondition
-  locationId  Int           // where it is physically stored
+  locationId  Int
   isActive    Boolean       @default(true)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -691,10 +835,6 @@ model Tooling {
   @@index([type])
 }
 
-// Variants of a finished product (different sizes, bundle configurations, etc.)
-// CORRUGATED_BOX: quantity breaks / standard vs. custom sizes
-// PACKAGING_SUPPLY / RESALE: different sizes or configurations
-// LABOR_SERVICE / OTHER: typically no variants
 model ProductVariant {
   id                 Int      @id @default(autoincrement())
   productId          Int
@@ -703,8 +843,8 @@ model ProductVariant {
   width              Decimal? @db.Decimal(8, 3)
   length             Decimal? @db.Decimal(8, 3)
   thickness          Decimal? @db.Decimal(8, 3)
-  bundleQty          Int?     // units per bundle
-  caseQty            Int?     // units per case
+  bundleQty          Int?
+  caseQty            Int?
   listPrice          Decimal? @db.Decimal(12, 4)
   isActive           Boolean  @default(true)
   createdAt          DateTime @default(now())
@@ -720,15 +860,13 @@ model ProductVariant {
   @@index([productId])
 }
 
-// Flexible key-value specs for non-box products (packaging supplies, etc.)
-// Also used to capture variant-level specs (e.g. slit width per roll variant).
 model ProductSpec {
   id        Int    @id @default(autoincrement())
   productId Int
-  variantId Int?   // optional: spec applies only to a specific variant
-  specKey   String // e.g. "slitWidth", "milThickness", "rollDiameter"
+  variantId Int?
+  specKey   String
   specValue String
-  specUnit  String? // e.g. "inches", "mil", "lbs"
+  specUnit  String?
   sortOrder Int?
 
   product Product         @relation(fields: [productId], references: [id])
@@ -737,7 +875,6 @@ model ProductSpec {
   @@index([productId])
 }
 
-// Finished goods on-hand inventory per product / variant / location.
 model FinishedGoodsInventory {
   id         Int      @id @default(autoincrement())
   productId  Int
@@ -755,13 +892,11 @@ model FinishedGoodsInventory {
   @@index([locationId])
 }
 
-// Move raw material or finished goods between locations.
-// Set materialId for raw material transfers; productId for finished goods.
 model InventoryTransfer {
   id              Int            @id @default(autoincrement())
-  materialId      Int?           // null if transferring finished goods
-  productId       Int?           // null if transferring raw material
-  variantId       Int?           // FK → MaterialVariant (for material transfers)
+  materialId      Int?
+  productId       Int?
+  variantId       Int?
   fromLocationId  Int
   toLocationId    Int
   quantity        Decimal        @db.Decimal(14, 4)
@@ -770,12 +905,12 @@ model InventoryTransfer {
   notes           String?
   status          TransferStatus @default(PENDING)
 
-  material      Material?       @relation(fields: [materialId],       references: [id])
-  product       Product?        @relation(fields: [productId],        references: [id])
-  materialVariant MaterialVariant? @relation(fields: [variantId],     references: [id])
-  fromLocation  Location        @relation("TransferFrom", fields: [fromLocationId], references: [id])
-  toLocation    Location        @relation("TransferTo",   fields: [toLocationId],   references: [id])
-  transferredBy User            @relation(fields: [transferredById],  references: [id])
+  material        Material?        @relation(fields: [materialId],       references: [id])
+  product         Product?         @relation(fields: [productId],        references: [id])
+  materialVariant MaterialVariant? @relation(fields: [variantId],        references: [id])
+  fromLocation    Location         @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation      Location         @relation("TransferTo",   fields: [toLocationId],   references: [id])
+  transferredBy   User             @relation(fields: [transferredById],  references: [id])
 
   @@index([materialId])
   @@index([productId])
@@ -789,7 +924,7 @@ model InventoryTransfer {
 
 model Quote {
   id          Int         @id @default(autoincrement())
-  quoteNumber String      @unique // e.g. "Q-2024-001" — generated by app
+  quoteNumber String      @unique
   customerId  Int
   createdById Int
   status      QuoteStatus @default(DRAFT)
@@ -810,8 +945,8 @@ model Quote {
 model QuoteItem {
   id          Int     @id @default(autoincrement())
   quoteId     Int
-  productId   Int?    // null for fully custom items with no catalog match
-  variantId   Int?    // optional: specific product variant being quoted
+  productId   Int?
+  variantId   Int?
   lineNumber  Int
   description String
   quantity    Int
@@ -830,13 +965,12 @@ model QuoteItem {
   @@index([quoteId])
 }
 
-// Custom costing BOM per quote line. Snapshot at time of quoting.
 model QuoteItemBOMLine {
   id          Int     @id @default(autoincrement())
   quoteItemId Int
   materialId  Int
   quantityPer Decimal @db.Decimal(14, 6)
-  unitCost    Decimal @db.Decimal(12, 4) // snapshot — doesn't change if material cost changes
+  unitCost    Decimal @db.Decimal(12, 4)
 
   quoteItem QuoteItem @relation(fields: [quoteItemId], references: [id], onDelete: Cascade)
   material  Material  @relation(fields: [materialId],  references: [id])
@@ -850,17 +984,16 @@ model QuoteItemBOMLine {
 
 model SalesOrder {
   id                 Int         @id @default(autoincrement())
-  orderNumber        String      @unique // e.g. "SO-2024-001" — generated by app
-  quoteId            Int?        @unique // null if order was entered directly, not from a quote
+  orderNumber        String      @unique
+  quoteId            Int?        @unique
   customerId         Int
   createdById        Int
   status             OrderStatus @default(OPEN)
   orderDate          DateTime    @default(now())
   requestedShipDate  DateTime?
-  customerPONumber   String?     // customer's own PO number for their records
-  customerPODate     DateTime?   // date printed on the customer's PO document
-  customerPODocument String?     // file path or URL to uploaded PO document
-  // Tolerance overrides — null means use the customer's defaultOver/UnderTolerance.
+  customerPONumber   String?
+  customerPODate     DateTime?
+  customerPODocument String?
   overTolerance      Decimal?    @db.Decimal(6, 2)
   underTolerance     Decimal?    @db.Decimal(6, 2)
   notes              String?
@@ -881,16 +1014,16 @@ model SalesOrder {
 model SalesOrderItem {
   id                Int      @id @default(autoincrement())
   orderId           Int
-  quoteItemId       Int?     // null if manually added, not converted from a quote
+  quoteItemId       Int?
   productId         Int?
-  variantId         Int?     // optional: specific product variant ordered
+  variantId         Int?
   lineNumber        Int
   description       String
   quantity          Int
   unitPrice         Decimal  @db.Decimal(12, 4)
-  qtyShipped        Int      @default(0)      // running total of qty shipped so far
-  toleranceOverride Boolean  @default(false)   // true if this line overrides order-level tolerance
-  qtyTolerance      Decimal? @db.Decimal(6, 2) // % tolerance for this line when toleranceOverride = true
+  qtyShipped        Int      @default(0)
+  toleranceOverride Boolean  @default(false)
+  qtyTolerance      Decimal? @db.Decimal(6, 2)
 
   order         SalesOrder      @relation(fields: [orderId],     references: [id], onDelete: Cascade)
   quoteItem     QuoteItem?      @relation(fields: [quoteItemId], references: [id])
@@ -907,15 +1040,13 @@ model SalesOrderItem {
 // PRODUCTION
 // ─────────────────────────────────────────────────────────────────────────────
 
-// One job per order line per work center operation.
-// sequence field orders multi-step jobs (1=print, 2=die cut, 3=glue).
 model ProductionJob {
   id                    Int          @id @default(autoincrement())
-  jobNumber             String       @unique // e.g. "JOB-2024-001" — generated by app
+  jobNumber             String       @unique
   orderItemId           Int
   workCenterId          Int
   locationId            Int
-  sequence              Int          // step order within a multi-operation run
+  sequence              Int
   status                JobStatus    @default(QUEUED)
   jobReadiness          JobReadiness @default(READY)
   sheetsConfirmed       Boolean      @default(false)
@@ -926,15 +1057,15 @@ model ProductionJob {
   quantityComplete      Int          @default(0)
   quantityGoodOutput    Int          @default(0)
   quantityWaste         Int          @default(0)
-  wasteQty              Int          @default(0) // legacy field — prefer quantityWaste
+  wasteQty              Int          @default(0)
   rawMaterialConsumed   Decimal      @default(0) @db.Decimal(14, 4)
   finishedGoodsProduced Int          @default(0)
   estimatedSetupMinutes Int?
   actualSetupMinutes    Int?
   estimatedRunMinutes   Int?
   actualRunMinutes      Int?
-  plateNumber           String?      // plate reference for this run
-  dieNumber             String?      // die reference for this run
+  plateNumber           String?
+  dieNumber             String?
   notes                 String?
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
@@ -949,13 +1080,11 @@ model ProductionJob {
   @@index([scheduledDate])
 }
 
-// Material consumption record for a production job.
-// Tracks what was issued vs actually used vs returned — supports job costing.
 model ProductionConsumption {
   id                   Int      @id @default(autoincrement())
   productionJobId      Int
   materialId           Int
-  variantId            Int?     // FK → MaterialVariant (which roll/sheet variant was used)
+  variantId            Int?
   locationId           Int
   quantityIssued       Decimal  @db.Decimal(14, 4)
   quantityActuallyUsed Decimal  @db.Decimal(14, 4)
@@ -980,18 +1109,16 @@ model ProductionConsumption {
 
 model Shipment {
   id                  Int            @id @default(autoincrement())
-  shipmentNumber      String         @unique // e.g. "SHP-2024-001" — generated by app
+  shipmentNumber      String         @unique
   orderId             Int
-  locationId          Int            // ship origin
+  locationId          Int
   status              ShipmentStatus @default(PENDING)
-  // Two-stage validation: warehouse enters quantities, CSR confirms before marking shipped.
   shipmentStage       ShipmentStage  @default(DRAFT)
   carrier             String?
   trackingNumber      String?
-  bolNumber           String?        // Bill of Lading number
-  totalWeight         Decimal?       @db.Decimal(10, 2) // lbs
+  bolNumber           String?
+  totalWeight         Decimal?       @db.Decimal(10, 2)
   palletCount         Int?
-  // Quantity validation fields (aggregate across all shipment items)
   systemSuggestedQty  Decimal?       @db.Decimal(14, 4)
   warehouseEnteredQty Decimal?       @db.Decimal(14, 4)
   confirmedQty        Decimal?       @db.Decimal(14, 4)
@@ -1014,12 +1141,11 @@ model Shipment {
   @@index([status])
 }
 
-// Which order lines are included in this shipment and how many.
 model ShipmentItem {
   id                  Int     @id @default(autoincrement())
   shipmentId          Int
   orderItemId         Int
-  variantId           Int?    // optional: specific product variant being shipped
+  variantId           Int?
   quantity            Int
   systemSuggestedQty  Decimal? @db.Decimal(14, 4)
   warehouseEnteredQty Decimal? @db.Decimal(14, 4)
@@ -1027,7 +1153,6 @@ model ShipmentItem {
   varianceNotes       String?
 
   shipment  Shipment        @relation(fields: [shipmentId],  references: [id], onDelete: Cascade)
-
   orderItem SalesOrderItem  @relation(fields: [orderItemId], references: [id])
   variant   ProductVariant? @relation(fields: [variantId],   references: [id])
 
@@ -1038,12 +1163,11 @@ model ShipmentItem {
 // INVOICING
 // ─────────────────────────────────────────────────────────────────────────────
 
-// One invoice per shipment/delivery. One order can have multiple invoices.
 model Invoice {
   id            Int           @id @default(autoincrement())
-  invoiceNumber String        @unique // e.g. "INV-2024-001" — generated by app
+  invoiceNumber String        @unique
   orderId       Int
-  shipmentId    Int?          // which delivery this invoice covers
+  shipmentId    Int?
   customerId    Int
   status        InvoiceStatus @default(DRAFT)
   invoiceDate   DateTime

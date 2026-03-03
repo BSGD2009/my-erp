@@ -44,7 +44,7 @@ export function ToolingRecordPage() {
   const [f, setF] = useState({ toolNumber: '', type: 'DIE', description: '', customerId: '', condition: 'NEW', locationId: '', isActive: true });
 
   useEffect(() => {
-    api.get<{ data: Location[] }>('/protected/locations').then(r => setLocations(r.data)).catch(() => {});
+    api.get<Location[]>('/protected/locations').then(setLocations).catch(() => {});
     api.get<{ data: Customer[] }>('/protected/customers?limit=500').then(r => setCustomers(r.data)).catch(() => {});
   }, []);
 

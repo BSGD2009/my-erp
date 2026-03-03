@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Layout } from '../components/Layout';
 import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
-import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle } from '../theme';
+import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle } from '../theme';
 
 interface Category {
   id: number; name: string; parentId?: number; description?: string;
@@ -31,7 +31,7 @@ export function ProductCategoriesListPage() {
   const [rows, setRows]       = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
-  const [sortBy, setSortBy]   = useState('name');
+  const [sortBy, setSortBy]   = useState('sortOrder');
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('asc');
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -59,8 +59,15 @@ export function ProductCategoriesListPage() {
   }
 
   const sorted = [...rows].sort((a, b) => {
-    const av = String((a as any)[sortBy] ?? '');
-    const bv = String((b as any)[sortBy] ?? '');
+    let av: string, bv: string;
+    if (sortBy === 'sortOrder') {
+      av = String(a.sortOrder ?? 999);
+      bv = String(b.sortOrder ?? 999);
+      const numA = parseInt(av), numB = parseInt(bv);
+      return sortDir === 'asc' ? numA - numB : numB - numA;
+    }
+    av = String((a as any)[sortBy] ?? '');
+    bv = String((b as any)[sortBy] ?? '');
     return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
 
@@ -101,6 +108,21 @@ export function ProductCategoriesListPage() {
     finally { setSaving(false); }
   }
 
+  async function deleteCategory(id: number, r: Category, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (r._count.products > 0) {
+      setError(`Cannot delete "${r.name}": it has ${r._count.products} product(s) assigned.`);
+      return;
+    }
+    if (!confirm(`Deactivate category "${r.name}"?`)) return;
+    try {
+      await api.delete(`/protected/product-categories/${id}`);
+      load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   return (
     <Layout>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: 12 }}>
@@ -113,36 +135,48 @@ export function ProductCategoriesListPage() {
 
       {error && <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '1rem', color: c.danger, fontSize: '0.875rem' }}>{error}</div>}
 
-      <div style={{ ...cardStyle, overflow: 'hidden', maxWidth: 760 }}>
+      <div style={{ ...cardStyle, overflow: 'hidden', maxWidth: 860 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
               <Th col="name"      label="Name"           sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Parent</th>
-              <Th col="_count.children" label="Sub-categories" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="_count.products" label="Products"       sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="sortOrder"        label="Sort Order"     sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="_count.children"  label="Sub-categories" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="_count.products"  label="Products"       sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Status</th>
+              <th style={{ padding: '0.75rem 1rem', width: 40 }} />
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={5} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>Loading…</td></tr>}
-            {!loading && sorted.length === 0 && <tr><td colSpan={5} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>No categories found.</td></tr>}
+            {loading && <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>Loading...</td></tr>}
+            {!loading && sorted.length === 0 && <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>No categories found.</td></tr>}
             {!loading && sorted.map(r => (
               <tr key={r.id} onClick={() => openEdit(r)} style={{ borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', transition: 'background 0.1s' }}
                 onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 500 }}>
-                  {r.parentId && <span style={{ color: c.textMuted, marginRight: 4 }}>↳</span>}{r.name}
+                  {r.parentId && <span style={{ color: c.textMuted, marginRight: 4 }}>-- </span>}{r.name}
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>
-                  {r.parentId ? (nameMap.get(r.parentId) ?? '—') : <span style={{ color: c.textMuted }}>Root</span>}
+                  {r.parentId ? (nameMap.get(r.parentId) ?? '--') : <span style={{ color: c.textMuted }}>Root</span>}
                 </td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.children > 0 ? r._count.children : '—'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.products > 0 ? r._count.products : '—'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textMuted, textAlign: 'center' }}>{r.sortOrder ?? '--'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.children > 0 ? r._count.children : '--'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.products > 0 ? r._count.products : '--'}</td>
                 <td style={{ padding: '0.75rem 1rem' }}>
                   <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: r.isActive ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)', color: r.isActive ? '#22c55e' : '#64748b' }}>
                     {r.isActive ? 'Active' : 'Inactive'}
                   </span>
+                </td>
+                <td style={{ padding: '0.75rem 1rem' }}>
+                  <button
+                    style={{ ...btnDanger, padding: '0.2rem 0.5rem', fontSize: '0.7rem' }}
+                    onClick={e => deleteCategory(r.id, r, e)}
+                    title="Deactivate category"
+                  >
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}
@@ -155,7 +189,7 @@ export function ProductCategoriesListPage() {
         <Field label="Name *"><input style={inputStyle} value={f.name} onChange={set('name')} placeholder="Corrugated Boxes" /></Field>
         <Field label="Parent Category">
           <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.parentId} onChange={set('parentId')}>
-            <option value="">— Root level —</option>
+            <option value="">-- Root level --</option>
             {rows.filter(r => r.id !== editId).map(r => (
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
@@ -171,7 +205,7 @@ export function ProductCategoriesListPage() {
           </label>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
-          <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving…' : editId ? 'Save Changes' : 'Create Category'}</button>
+          <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : editId ? 'Save Changes' : 'Create Category'}</button>
           <button style={btnSecondary} onClick={() => setDrawerOpen(false)}>Cancel</button>
         </div>
       </Drawer>

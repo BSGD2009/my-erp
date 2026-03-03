@@ -15,6 +15,11 @@ import productCategoriesRouter from './routes/productCategories';
 import productsRouter          from './routes/products';
 import toolingRouter           from './routes/tooling';
 import inventoryRouter         from './routes/inventory';
+import paymentTermsRouter      from './routes/paymentTerms';
+import materialTypesRouter     from './routes/materialTypes';
+import workCenterTypesRouter   from './routes/workCenterTypes';
+import equipmentRouter         from './routes/equipment';
+import operationsRouter        from './routes/operations';
 
 dotenv.config();
 
@@ -57,6 +62,15 @@ app.use('/api/protected/product-categories', productCategoriesRouter);
 app.use('/api/protected/products',           productsRouter);
 app.use('/api/protected/tooling',            toolingRouter);
 app.use('/api/protected/inventory',          inventoryRouter);
+
+// Admin lookups
+app.use('/api/protected/payment-terms',      paymentTermsRouter);
+app.use('/api/protected/material-types',     materialTypesRouter);
+app.use('/api/protected/work-center-types',  workCenterTypesRouter);
+
+// Operations & equipment
+app.use('/api/protected/equipment',          equipmentRouter);
+app.use('/api/protected/operations',         operationsRouter);
 
 // ── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

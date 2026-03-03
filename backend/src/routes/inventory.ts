@@ -16,7 +16,7 @@ router.get('/materials', async (req, res) => {
   const rows = await prisma.materialInventory.findMany({
     where,
     include: {
-      material: { select: { id: true, code: true, name: true, type: true, unitOfMeasure: true } },
+      material: { select: { id: true, code: true, name: true, unitOfMeasure: true, materialType: { select: { id: true, typeKey: true, typeName: true } } } },
       location: { select: { id: true, name: true } },
     },
     orderBy: [{ material: { name: 'asc' } }, { location: { name: 'asc' } }],

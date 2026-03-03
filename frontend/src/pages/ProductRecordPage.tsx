@@ -95,7 +95,7 @@ export function ProductRecordPage() {
 
   // ── Load supporting data ──
   useEffect(() => {
-    api.get<{ data: Category[] }>('/protected/product-categories').then(r => setCategories(r.data)).catch(() => {});
+    api.get<Category[]>('/protected/product-categories').then(setCategories).catch(() => {});
     api.get<{ data: Material[] }>('/protected/materials?limit=500').then(r => setMaterials(r.data)).catch(() => {});
   }, []);
 

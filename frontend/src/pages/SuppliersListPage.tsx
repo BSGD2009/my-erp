@@ -1,18 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
-import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle } from '../theme';
+import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle } from '../theme';
 
+interface PaymentTerm { id: number; termCode: string; termName: string; netDays: number }
 interface Supplier {
-  id: number; code: string; name: string; contactName?: string;
-  email?: string; phone?: string; paymentTerms?: string;
-  leadTimeDays?: number; isActive: boolean;
+  id: number; code: string; name: string; accountNumber?: string; taxId?: string;
+  is1099Eligible: boolean; name1099?: string;
+  street?: string; city?: string; state?: string; zip?: string; country?: string;
+  paymentTermId?: number; paymentTerm?: { id: number; termName: string };
+  creditLimit?: number; w9OnFile: boolean; isActive: boolean;
+  _count?: { contacts: number; purchaseOrders: number };
 }
 
 const EMPTY = {
-  code: '', name: '', contactName: '', email: '', phone: '',
-  address: '', paymentTerms: '', leadTimeDays: '', notes: '', isActive: true,
+  name: '', code: '', accountNumber: '', taxId: '',
+  is1099Eligible: false, name1099: '',
+  street: '', city: '', state: '', zip: '', country: 'US',
+  paymentTermId: '', creditLimit: '', w9OnFile: false,
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -31,6 +38,7 @@ function Th({ col, label, sortBy, sortDir, onSort }: {
 }
 
 export function SuppliersListPage() {
+  const navigate = useNavigate();
   const [rows, setRows]       = useState<Supplier[]>([]);
   const [total, setTotal]     = useState(0);
   const [loading, setLoading] = useState(true);
@@ -41,12 +49,18 @@ export function SuppliersListPage() {
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('asc');
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editId, setEditId]         = useState<number|null>(null);
   const [f, setF]                   = useState(EMPTY);
   const [saving, setSaving]         = useState(false);
   const [saveErr, setSaveErr]       = useState('');
+  const [toast, setToast]           = useState<{ text: string; type: 'success'|'error' } | null>(null);
+
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTerm[]>([]);
 
   const LIMIT = 50;
+
+  useEffect(() => {
+    api.get<PaymentTerm[]>('/protected/payment-terms').then(setPaymentTerms).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -74,45 +88,52 @@ export function SuppliersListPage() {
   });
 
   function openNew() {
-    setEditId(null); setF(EMPTY); setSaveErr(''); setDrawerOpen(true);
+    setF(EMPTY); setSaveErr(''); setDrawerOpen(true);
   }
 
-  async function openEdit(id: number) {
-    setSaveErr(''); setEditId(id); setDrawerOpen(true);
-    try {
-      const r = await api.get<any>(`/protected/suppliers/${id}`);
-      setF({
-        code: r.code, name: r.name,
-        contactName: r.contactName ?? '', email: r.email ?? '', phone: r.phone ?? '',
-        address: r.address ?? '', paymentTerms: r.paymentTerms ?? '',
-        leadTimeDays: r.leadTimeDays != null ? String(r.leadTimeDays) : '',
-        notes: r.notes ?? '', isActive: r.isActive,
-      });
-    } catch {}
-  }
+  const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>) =>
+    setF(p => ({ ...p, [k]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }));
 
-  const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement>) =>
-    setF(p => ({ ...p, [k]: e.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }));
+  function flash(text: string, type: 'success'|'error' = 'success') {
+    setToast({ text, type });
+    if (type === 'success') setTimeout(() => setToast(null), 3500);
+  }
 
   async function save() {
-    if (!f.code.trim()) { setSaveErr('Code is required'); return; }
     if (!f.name.trim()) { setSaveErr('Name is required'); return; }
     setSaving(true); setSaveErr('');
     try {
-      const body = {
-        code: f.code.trim().toUpperCase(), name: f.name.trim(),
-        contactName: f.contactName || null, email: f.email || null,
-        phone: f.phone || null, address: f.address || null,
-        paymentTerms: f.paymentTerms || null,
-        leadTimeDays: f.leadTimeDays ? parseInt(f.leadTimeDays) : null,
-        notes: f.notes || null,
-        ...(editId ? { isActive: f.isActive } : {}),
+      const body: Record<string, unknown> = {
+        name: f.name.trim(),
+        code: f.code.trim() ? f.code.trim().toUpperCase() : undefined,
+        accountNumber: f.accountNumber || null,
+        taxId: f.taxId || null,
+        is1099Eligible: f.is1099Eligible,
+        name1099: f.is1099Eligible && f.name1099 ? f.name1099.trim() : null,
+        street: f.street || null,
+        city: f.city || null,
+        state: f.state || null,
+        zip: f.zip || null,
+        country: f.country || 'US',
+        paymentTermId: f.paymentTermId ? parseInt(f.paymentTermId) : null,
+        creditLimit: f.creditLimit ? parseFloat(f.creditLimit) : null,
+        w9OnFile: f.w9OnFile,
       };
-      if (editId) await api.put(`/protected/suppliers/${editId}`, body);
-      else        await api.post('/protected/suppliers', body);
-      setDrawerOpen(false); load();
+      await api.post('/protected/suppliers', body);
+      setDrawerOpen(false);
+      flash('Supplier created.');
+      load();
     } catch (e: any) { setSaveErr(e.message); }
     finally { setSaving(false); }
+  }
+
+  async function handleDelete(id: number, name: string) {
+    if (!confirm(`Deactivate supplier "${name}"?`)) return;
+    try {
+      await api.delete(`/protected/suppliers/${id}`);
+      flash('Supplier deactivated.');
+      load();
+    } catch (e: any) { flash(e.message, 'error'); }
   }
 
   const pages = Math.max(1, Math.ceil(total / LIMIT));
@@ -127,8 +148,17 @@ export function SuppliersListPage() {
         <button style={btnPrimary} onClick={openNew}>+ New Supplier</button>
       </div>
 
+      {toast && (
+        <div style={{
+          background: toast.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.10)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          borderRadius: 8, padding: '0.65rem 1rem', marginBottom: '1rem', fontSize: '0.85rem',
+          color: toast.type === 'success' ? '#22c55e' : c.danger,
+        }}>{toast.text}</div>
+      )}
+
       <div style={{ display: 'flex', gap: 10, marginBottom: '1.25rem' }}>
-        <input style={{ ...inputStyle, maxWidth: 280 }} placeholder="Search name, code, contact…" value={search} onChange={e => setSearch(e.target.value)} />
+        <input style={{ ...inputStyle, maxWidth: 280 }} placeholder="Search name, code, city..." value={search} onChange={e => setSearch(e.target.value)} />
         {search && <button style={btnSecondary} onClick={() => setSearch('')}>Clear</button>}
       </div>
 
@@ -138,34 +168,45 @@ export function SuppliersListPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
-              <Th col="code"         label="Code"      sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="name"         label="Name"      sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="contactName"  label="Contact"   sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="email"        label="Email"     sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="phone"        label="Phone"     sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="paymentTerms" label="Terms"     sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="leadTimeDays" label="Lead Time" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="name"  label="Name"  sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="code"  label="Code"  sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="city"  label="City / State" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Terms</th>
+              <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Contacts</th>
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Status</th>
+              <th style={{ padding: '0.75rem 1rem', width: 40 }} />
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>Loading…</td></tr>}
-            {!loading && sorted.length === 0 && <tr><td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>No suppliers found.</td></tr>}
+            {loading && <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>Loading...</td></tr>}
+            {!loading && sorted.length === 0 && <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>No suppliers found.</td></tr>}
             {!loading && sorted.map(r => (
-              <tr key={r.id} onClick={() => openEdit(r.id)} style={{ borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', transition: 'background 0.1s' }}
+              <tr key={r.id} style={{ borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', transition: 'background 0.1s' }}
                 onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.accent, fontWeight: 600 }}>{r.code}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 500 }}>{r.name}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.contactName ?? '—'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.email ?? '—'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.phone ?? '—'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.paymentTerms ?? '—'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.leadTimeDays != null ? `${r.leadTimeDays}d` : '—'}</td>
-                <td style={{ padding: '0.75rem 1rem' }}>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 500 }} onClick={() => navigate(`/suppliers/${r.id}`)}>{r.name}</td>
+                <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.accent, fontWeight: 600 }} onClick={() => navigate(`/suppliers/${r.id}`)}>{r.code}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }} onClick={() => navigate(`/suppliers/${r.id}`)}>
+                  {r.city && r.state ? `${r.city}, ${r.state}` : r.city || r.state || '\u2014'}
+                </td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }} onClick={() => navigate(`/suppliers/${r.id}`)}>
+                  {r.paymentTerm?.termName ?? '\u2014'}
+                </td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }} onClick={() => navigate(`/suppliers/${r.id}`)}>
+                  {r._count?.contacts ?? 0}
+                </td>
+                <td style={{ padding: '0.75rem 1rem' }} onClick={() => navigate(`/suppliers/${r.id}`)}>
                   <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: r.isActive ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)', color: r.isActive ? '#22c55e' : '#64748b' }}>
                     {r.isActive ? 'Active' : 'Inactive'}
                   </span>
+                </td>
+                <td style={{ padding: '0.75rem 0.5rem' }}>
+                  {r.isActive && (
+                    <button style={{ ...btnDanger, padding: '0.25rem 0.5rem', fontSize: '0.7rem' }}
+                      onClick={e => { e.stopPropagation(); handleDelete(r.id, r.name); }}>
+                      Deactivate
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -175,32 +216,62 @@ export function SuppliersListPage() {
 
       {pages > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: '1.25rem' }}>
-          <button style={btnSecondary} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+          <button style={btnSecondary} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
           <span style={{ fontSize: '0.82rem', color: c.textLabel }}>Page {page} of {pages}</span>
-          <button style={btnSecondary} disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Next →</button>
+          <button style={btnSecondary} disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Next</button>
         </div>
       )}
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={editId ? 'Edit Supplier' : 'New Supplier'}>
+      {/* New Supplier drawer */}
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="New Supplier" width={540}>
         {saveErr && <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.65rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', color: c.danger }}>{saveErr}</div>}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1rem' }}>
-          <Field label="Code *"><input style={inputStyle} value={f.code} onChange={set('code')} placeholder="SUPPL-01" /></Field>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem 1.25rem' }}>
           <Field label="Name *"><input style={inputStyle} value={f.name} onChange={set('name')} placeholder="Acme Paper Co." /></Field>
-          <Field label="Contact Name"><input style={inputStyle} value={f.contactName} onChange={set('contactName')} /></Field>
-          <Field label="Email"><input style={inputStyle} type="email" value={f.email} onChange={set('email')} /></Field>
-          <Field label="Phone"><input style={inputStyle} value={f.phone} onChange={set('phone')} /></Field>
-          <Field label="Payment Terms"><input style={inputStyle} value={f.paymentTerms} onChange={set('paymentTerms')} placeholder="Net 30" /></Field>
-          <Field label="Lead Time (days)"><input style={inputStyle} type="number" value={f.leadTimeDays} onChange={set('leadTimeDays')} /></Field>
+          <Field label="Code (auto if blank)"><input style={inputStyle} value={f.code} onChange={set('code')} placeholder="ACME01" /></Field>
+          <Field label="Account Number"><input style={inputStyle} value={f.accountNumber} onChange={set('accountNumber')} /></Field>
+          <Field label="Tax ID"><input style={inputStyle} value={f.taxId} onChange={set('taxId')} /></Field>
         </div>
-        <Field label="Address"><textarea style={{ ...inputStyle, height: 60, resize: 'vertical' }} value={f.address} onChange={set('address')} /></Field>
-        <Field label="Notes"><textarea style={{ ...inputStyle, height: 64, resize: 'vertical' }} value={f.notes} onChange={set('notes')} /></Field>
-        {editId && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer', marginBottom: '1.25rem' }}>
-            <input type="checkbox" checked={f.isActive} onChange={set('isActive')} /> Active
+
+        <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
+            <input type="checkbox" checked={f.is1099Eligible} onChange={set('is1099Eligible')} /> 1099 Eligible
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
+            <input type="checkbox" checked={f.w9OnFile} onChange={set('w9OnFile')} /> W9 On File
+          </label>
+        </div>
+
+        {f.is1099Eligible && (
+          <Field label="1099 Name"><input style={inputStyle} value={f.name1099} onChange={set('name1099')} placeholder="Legal name for 1099" /></Field>
         )}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving…' : editId ? 'Save Changes' : 'Create Supplier'}</button>
+
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.85rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${c.divider}` }}>
+          Address
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem 1.25rem' }}>
+          <div style={{ gridColumn: '1 / -1' }}><Field label="Street"><input style={inputStyle} value={f.street} onChange={set('street')} /></Field></div>
+          <Field label="City"><input style={inputStyle} value={f.city} onChange={set('city')} /></Field>
+          <Field label="State"><input style={inputStyle} value={f.state} onChange={set('state')} /></Field>
+          <Field label="Zip"><input style={inputStyle} value={f.zip} onChange={set('zip')} /></Field>
+          <Field label="Country"><input style={inputStyle} value={f.country} onChange={set('country')} /></Field>
+        </div>
+
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.85rem', paddingBottom: '0.5rem', borderBottom: `1px solid ${c.divider}` }}>
+          Payment
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem 1.25rem' }}>
+          <Field label="Payment Terms">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.paymentTermId} onChange={set('paymentTermId')}>
+              <option value="">-- Select --</option>
+              {paymentTerms.map(t => <option key={t.id} value={t.id}>{t.termName}</option>)}
+            </select>
+          </Field>
+          <Field label="Credit Limit ($)"><input style={inputStyle} type="number" step="0.01" value={f.creditLimit} onChange={set('creditLimit')} /></Field>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
+          <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Create Supplier'}</button>
           <button style={btnSecondary} onClick={() => setDrawerOpen(false)}>Cancel</button>
         </div>
       </Drawer>

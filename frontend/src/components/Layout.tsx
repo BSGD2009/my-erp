@@ -26,10 +26,25 @@ const NAV_SECTIONS = [
     ],
   },
   {
+    section: 'Production',
+    items: [
+      { path: '/equipment',  label: 'Equipment' },
+      { path: '/operations', label: 'Operations' },
+    ],
+  },
+  {
     section: 'Inventory',
     items: [
       { path: '/inventory', label: 'Inventory' },
       { path: '/transfers', label: 'Transfers' },
+    ],
+  },
+  {
+    section: 'Admin Settings',
+    items: [
+      { path: '/admin/payment-terms',     label: 'Payment Terms' },
+      { path: '/admin/material-types',    label: 'Material Types' },
+      { path: '/admin/work-center-types', label: 'Work Center Types' },
     ],
   },
 ];

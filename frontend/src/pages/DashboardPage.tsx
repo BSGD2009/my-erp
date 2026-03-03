@@ -46,12 +46,15 @@ export function DashboardPage() {
 }
 
 const MODULES = [
-  { icon: '🏢', label: 'Master Data',  session: 'Session 3 ✓', path: null },
+  { icon: '👥', label: 'Customers',    session: 'Session 3 ✓', path: '/customers' },
+  { icon: '🏭', label: 'Suppliers',    session: 'Session 3 ✓', path: '/suppliers' },
+  { icon: '📍', label: 'Locations',    session: 'Session 3 ✓', path: '/locations' },
+  { icon: '🔩', label: 'Materials',    session: 'Session 3 ✓', path: '/materials' },
   { icon: '📦', label: 'Products',     session: 'Session 4 ✓', path: '/products' },
   { icon: '🔧', label: 'Tooling',      session: 'Session 4 ✓', path: '/tooling' },
-  { icon: '🏭', label: 'Inventory',    session: 'Session 4 ✓', path: '/inventory' },
+  { icon: '📊', label: 'Inventory',    session: 'Session 4 ✓', path: '/inventory' },
+  { icon: '⚙️',  label: 'Equipment',   session: 'Session 4 ✓', path: '/equipment' },
   { icon: '💬', label: 'Quotes',       session: 'Session 6',   path: null },
   { icon: '📋', label: 'Sales Orders', session: 'Session 7',   path: null },
-  { icon: '⚙️',  label: 'Production',  session: 'Session 8',   path: null },
   { icon: '🚛', label: 'Shipping',     session: 'Session 10',  path: null },
 ];

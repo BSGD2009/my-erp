@@ -5,11 +5,11 @@ import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
 import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle, STATUS_COLORS } from '../theme';
 
-interface MatRow { materialId: number; material: { id: number; code: string; name: string; type: string; unitOfMeasure: string }; totalQty: number; locations: Array<{ locationId: number; location: { id: number; name: string }; quantity: number; avgCost: string }> }
+interface MatRow { materialId: number; material: { id: number; code: string; name: string; unitOfMeasure: string; materialType?: { id: number; typeKey: string; typeName: string } }; totalQty: number; locations: Array<{ locationId: number; location: { id: number; name: string }; quantity: number; avgCost: string }> }
 interface FGRow { id: number; product: { id: number; sku: string; name: string; productType: string }; variant?: { id: number; sku: string }; location: { id: number; name: string }; quantity: string; avgCost?: string }
 interface Transfer { id: number; materialId?: number; productId?: number; quantity: string; status: string; notes?: string; transferredAt: string; material?: { id: number; code: string; name: string }; product?: { id: number; sku: string; name: string }; fromLocation: { id: number; name: string }; toLocation: { id: number; name: string }; transferredBy: { id: number; name: string } }
 interface Location { id: number; name: string }
-interface Material { id: number; code: string; name: string; type: string }
+interface Material { id: number; code: string; name: string }
 interface Product  { id: number; sku: string; name: string }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -27,6 +27,11 @@ export function InventoryPage() {
   const location = useLocation();
   const [activeTab, setTab] = useState<Tab>(location.pathname === '/transfers' ? 'transfers' : 'materials');
   const [msg, setMsg]       = useState<{ text: string; type: 'success'|'error' } | null>(null);
+
+  // Sync tab when navigating between /inventory and /transfers
+  useEffect(() => {
+    setTab(location.pathname === '/transfers' ? 'transfers' : 'materials');
+  }, [location.pathname]);
 
   function flash(text: string, type: 'success'|'error' = 'success') {
     setMsg({ text, type });
@@ -66,7 +71,7 @@ export function InventoryPage() {
   );
 }
 
-// ─── Material Inventory ───────────────────────────────────────────────────────
+// ---- Material Inventory ----
 function MaterialInventoryTab() {
   const [rows, setRows] = useState<MatRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +88,7 @@ function MaterialInventoryTab() {
     setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   }
 
-  if (loading) return <div style={{ color: c.textMuted, textAlign:'center', padding:'3rem' }}>Loading…</div>;
+  if (loading) return <div style={{ color: c.textMuted, textAlign:'center', padding:'3rem' }}>Loading...</div>;
 
   return (
     <div style={{ ...cardStyle, overflow:'hidden' }}>
@@ -98,28 +103,28 @@ function MaterialInventoryTab() {
         <tbody>
           {rows.length === 0 && <tr><td colSpan={6} style={{ padding:'3rem', textAlign:'center', color:c.textMuted, fontSize:'0.875rem' }}>No inventory records.</td></tr>}
           {rows.map(r => (
-            <>
-              <tr key={r.materialId} style={{ borderBottom:`1px solid ${c.divider}`, cursor:'pointer', transition:'background 0.1s' }}
+            <tbody key={r.materialId}>
+              <tr style={{ borderBottom:`1px solid ${c.divider}`, cursor:'pointer', transition:'background 0.1s' }}
                 onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 onClick={() => toggle(r.materialId)}>
                 <td style={{ padding:'0.75rem 1rem', fontSize:'0.875rem', fontWeight:600 }}>{r.material.name}</td>
                 <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', fontSize:'0.82rem', color:c.textLabel }}>{r.material.code}</td>
-                <td style={{ padding:'0.75rem 1rem', fontSize:'0.78rem', color:c.textMuted }}>{r.material.type}</td>
+                <td style={{ padding:'0.75rem 1rem', fontSize:'0.78rem', color:c.textMuted }}>{r.material.materialType?.typeName ?? '--'}</td>
                 <td style={{ padding:'0.75rem 1rem', fontSize:'0.95rem', fontWeight:700, color: r.totalQty > 0 ? c.accent : c.danger }}>{r.totalQty.toLocaleString()}</td>
                 <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.material.unitOfMeasure}</td>
-                <td style={{ padding:'0.75rem 1rem', fontSize:'0.75rem', color:c.textMuted }}>{expanded.has(r.materialId) ? '▲ collapse' : '▼ by location'}</td>
+                <td style={{ padding:'0.75rem 1rem', fontSize:'0.75rem', color:c.textMuted }}>{expanded.has(r.materialId) ? 'collapse' : 'by location'}</td>
               </tr>
               {expanded.has(r.materialId) && r.locations.map(loc => (
                 <tr key={`${r.materialId}-${loc.locationId}`} style={{ background:'rgba(255,255,255,0.02)', borderBottom:`1px solid ${c.divider}` }}>
-                  <td colSpan={2} style={{ padding:'0.5rem 1rem 0.5rem 2.5rem', fontSize:'0.8rem', color:c.textMuted }}>└ {loc.location.name}</td>
+                  <td colSpan={2} style={{ padding:'0.5rem 1rem 0.5rem 2.5rem', fontSize:'0.8rem', color:c.textMuted }}>-- {loc.location.name}</td>
                   <td />
                   <td style={{ padding:'0.5rem 1rem', fontSize:'0.85rem', color:c.textPrimary }}>{loc.quantity.toLocaleString()}</td>
                   <td style={{ padding:'0.5rem 1rem', fontSize:'0.8rem', color:c.textMuted }}>{loc.avgCost ? `$${Number(loc.avgCost).toFixed(4)} avg` : ''}</td>
                   <td />
                 </tr>
               ))}
-            </>
+            </tbody>
           ))}
         </tbody>
       </table>
@@ -127,7 +132,7 @@ function MaterialInventoryTab() {
   );
 }
 
-// ─── Finished Goods Inventory ─────────────────────────────────────────────────
+// ---- Finished Goods Inventory ----
 function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
   const [rows, setRows] = useState<FGRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,7 +144,7 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div style={{ color:c.textMuted, textAlign:'center', padding:'3rem' }}>Loading…</div>;
+  if (loading) return <div style={{ color:c.textMuted, textAlign:'center', padding:'3rem' }}>Loading...</div>;
 
   return (
     <div style={{ ...cardStyle, overflow:'hidden' }}>
@@ -159,10 +164,10 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
               <td style={{ padding:'0.75rem 1rem', fontSize:'0.875rem' }}>{r.product.name}</td>
               <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', fontSize:'0.82rem', color:c.accent }}>{r.product.sku}</td>
-              <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.variant?.sku ?? '—'}</td>
+              <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.variant?.sku ?? '--'}</td>
               <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.location.name}</td>
               <td style={{ padding:'0.75rem 1rem', fontSize:'0.95rem', fontWeight:700, color: Number(r.quantity) > 0 ? c.accent : c.danger }}>{Number(r.quantity).toLocaleString()}</td>
-              <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.avgCost ? `$${Number(r.avgCost).toFixed(4)}` : '—'}</td>
+              <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.avgCost ? `$${Number(r.avgCost).toFixed(4)}` : '--'}</td>
             </tr>
           ))}
         </tbody>
@@ -171,7 +176,7 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
   );
 }
 
-// ─── Transfers ────────────────────────────────────────────────────────────────
+// ---- Transfers ----
 const XFER_EMPTY = { transferType: 'material', materialId: '', productId: '', fromLocationId: '', toLocationId: '', quantity: '', notes: '', status: 'PENDING' };
 
 function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => void }) {
@@ -229,7 +234,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
     try {
       await api.put(`/protected/inventory/transfers/${id}`, { status: 'COMPLETED' });
       await load();
-      flash('Transfer completed — inventory updated.');
+      flash('Transfer completed -- inventory updated.');
     } catch (e: any) { flash(e.message, 'error'); }
   }
 
@@ -244,13 +249,27 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
 
   return (
     <div>
+      {/* Info banner */}
+      <div style={{
+        background: 'rgba(59,130,246,0.08)',
+        border: '1px solid rgba(59,130,246,0.2)',
+        borderRadius: 8,
+        padding: '0.75rem 1rem',
+        marginBottom: '1.25rem',
+        fontSize: '0.85rem',
+        color: '#93c5fd',
+        lineHeight: 1.55,
+      }}>
+        Transfers move inventory between locations. Inventory conversion happens automatically when a production job is completed.
+      </div>
+
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1rem' }}>
         <span style={{ fontSize:'0.85rem', color:c.textMuted }}>{transfers.length} transfer{transfers.length !== 1 ? 's' : ''} on record</span>
         <button style={btnPrimary} onClick={openNew}>+ New Transfer</button>
       </div>
 
       {loading ? (
-        <div style={{ color:c.textMuted, textAlign:'center', padding:'3rem' }}>Loading…</div>
+        <div style={{ color:c.textMuted, textAlign:'center', padding:'3rem' }}>Loading...</div>
       ) : transfers.length === 0 ? (
         <div style={{ ...cardStyle, padding:'2rem', textAlign:'center', color:c.textMuted, fontSize:'0.875rem' }}>No transfers yet.</div>
       ) : (
@@ -271,7 +290,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.78rem', color:c.textMuted }}>{new Date(t.transferredAt).toLocaleDateString()}</td>
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.85rem' }}>
                       {t.material ? <span><span style={{ fontFamily:'monospace', color:c.textLabel, fontSize:'0.78rem' }}>{t.material.code}</span> {t.material.name}</span>
-                                  : t.product ? <span><span style={{ fontFamily:'monospace', color:c.accent, fontSize:'0.78rem' }}>{t.product.sku}</span> {t.product.name}</span> : '—'}
+                                  : t.product ? <span><span style={{ fontFamily:'monospace', color:c.accent, fontSize:'0.78rem' }}>{t.product.sku}</span> {t.product.name}</span> : '--'}
                     </td>
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.875rem', fontWeight:600 }}>{Number(t.quantity).toLocaleString()}</td>
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{t.fromLocation.name}</td>
@@ -313,15 +332,15 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
         {f.transferType === 'material' ? (
           <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Material *</label>
             <select style={{ ...inputStyle, cursor:'pointer' }} value={f.materialId} onChange={set('materialId')}>
-              <option value="">— Select —</option>
-              {materials.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+              <option value="">-- Select --</option>
+              {materials.map(m => <option key={m.id} value={m.id}>{m.code} -- {m.name}</option>)}
             </select>
           </div>
         ) : (
           <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Product *</label>
             <select style={{ ...inputStyle, cursor:'pointer' }} value={f.productId} onChange={set('productId')}>
-              <option value="">— Select —</option>
-              {products.map(p => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
+              <option value="">-- Select --</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.sku} -- {p.name}</option>)}
             </select>
           </div>
         )}
@@ -329,13 +348,13 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 1rem' }}>
           <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>From Location *</label>
             <select style={{ ...inputStyle, cursor:'pointer' }} value={f.fromLocationId} onChange={set('fromLocationId')}>
-              <option value="">— Select —</option>
+              <option value="">-- Select --</option>
               {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
           <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>To Location *</label>
             <select style={{ ...inputStyle, cursor:'pointer' }} value={f.toLocationId} onChange={set('toLocationId')}>
-              <option value="">— Select —</option>
+              <option value="">-- Select --</option>
               {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
@@ -366,7 +385,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
         </div>
 
         <div style={{ display:'flex', gap:8 }}>
-          <button style={btnPrimary} onClick={createTransfer} disabled={saving}>{saving ? 'Creating…' : 'Create Transfer'}</button>
+          <button style={btnPrimary} onClick={createTransfer} disabled={saving}>{saving ? 'Creating...' : 'Create Transfer'}</button>
           <button style={btnSecondary} onClick={() => setDrawerOpen(false)}>Cancel</button>
         </div>
       </Drawer>
