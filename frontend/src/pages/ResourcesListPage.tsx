@@ -8,27 +8,40 @@ import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle } from '
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
-interface EquipmentType { id: number; typeKey: string; typeName: string }
-interface Location { id: number; name: string }
-interface Supplier { id: number; name: string }
 
-interface Equipment {
-  id: number; name: string; manufacturer?: string; modelNumber?: string;
-  serialNumber?: string; isActive: boolean;
-  equipmentType: { id: number; typeKey: string; typeName: string };
-  location: { id: number; name: string };
+interface ResourceType { id: number; typeKey: string; typeName: string }
+interface Location     { id: number; name: string }
+interface Supplier     { id: number; name: string }
+
+interface Resource {
+  id: number;
+  name: string;
+  manufacturer?: string;
+  modelNumber?: string;
+  serialNumber?: string;
+  isActive: boolean;
+  resourceType: { id: number; typeKey: string; typeName: string };
+  location:     { id: number; name: string };
 }
-
-const EMPTY_FORM = {
-  name: '', equipmentTypeId: '', locationId: '', manufacturer: '', modelNumber: '',
-  serialNumber: '', yearOfManufacture: '', maxSheetWidth: '', maxSheetLength: '',
-  minSheetWidth: '', minSheetLength: '', maxSpeed: '', purchaseDate: '',
-  purchasePrice: '', warrantyExpiry: '', assetTagId: '', partsSupplierId: '', notes: '',
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+function typeBadgeColor(typeKey: string) {
+  switch (typeKey) {
+    case 'CORRUGATOR':         return { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa' };
+    case 'FLEXO_FOLDER_GLUER': return { bg: 'rgba(168,85,247,0.12)', color: '#c084fc' };
+    case 'ROTARY_DIE_CUT':    return { bg: 'rgba(245,158,11,0.12)',  color: '#f59e0b' };
+    case 'FLATBED_DIE_CUT':   return { bg: 'rgba(236,72,153,0.12)', color: '#f472b6' };
+    case 'PRINTER':            return { bg: 'rgba(34,197,94,0.12)',  color: '#22c55e' };
+    case 'SLITTER_SCORER':    return { bg: 'rgba(14,165,233,0.12)',  color: '#38bdf8' };
+    case 'GLUER':              return { bg: 'rgba(244,63,94,0.12)',  color: '#fb7185' };
+    case 'BANDER':             return { bg: 'rgba(139,92,246,0.12)', color: '#a78bfa' };
+    default:                   return { bg: 'rgba(100,116,139,0.12)', color: '#94a3b8' };
+  }
+}
+
 function Field({ label, children, full }: { label: string; children: React.ReactNode; full?: boolean }) {
   return (
     <div style={{ marginBottom: '0.85rem', ...(full ? { gridColumn: '1 / -1' } : {}) }}>
@@ -38,103 +51,110 @@ function Field({ label, children, full }: { label: string; children: React.React
   );
 }
 
-function Toast({ msg, type }: { msg: string; type: 'success' | 'error' }) {
-  const colors = type === 'success'
-    ? { bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.3)', color: '#22c55e' }
-    : { bg: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.3)', color: c.danger };
+function SectionHeader({ label }: { label: string }) {
   return (
-    <div style={{ background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '0.65rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', color: colors.color }}>
-      {msg}
+    <div style={{
+      fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em',
+      textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: '0.25rem',
+      paddingBottom: '0.4rem', borderBottom: `1px solid ${c.divider}`,
+    }}>
+      {label}
     </div>
   );
 }
 
-// Badge color for equipment types
-function typeBadgeColor(typeKey: string) {
-  switch (typeKey) {
-    case 'CORRUGATOR':    return { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' };
-    case 'FLEXO_FOLDER_GLUER': return { bg: 'rgba(168,85,247,0.12)', color: '#c084fc' };
-    case 'ROTARY_DIE_CUT': return { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' };
-    case 'FLATBED_DIE_CUT': return { bg: 'rgba(236,72,153,0.12)', color: '#f472b6' };
-    case 'PRINTER':       return { bg: 'rgba(34,197,94,0.12)', color: '#22c55e' };
-    case 'SLITTER_SCORER': return { bg: 'rgba(14,165,233,0.12)', color: '#38bdf8' };
-    case 'GLUER':         return { bg: 'rgba(244,63,94,0.12)', color: '#fb7185' };
-    case 'BANDER':        return { bg: 'rgba(139,92,246,0.12)', color: '#a78bfa' };
-    default:              return { bg: 'rgba(100,116,139,0.12)', color: '#94a3b8' };
-  }
-}
+const EMPTY_FORM = {
+  name: '', resourceTypeId: '', locationId: '',
+  manufacturer: '', modelNumber: '', serialNumber: '', yearOfManufacture: '',
+  maxSheetWidth: '', maxSheetLength: '', minSheetWidth: '', minSheetLength: '', maxSpeed: '',
+  purchaseDate: '', purchasePrice: '', warrantyExpiry: '', assetTagId: '', partsSupplierId: '',
+  notes: '',
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Page
+// Component
 // ─────────────────────────────────────────────────────────────────────────────
-export function EquipmentListPage() {
+
+export function ResourcesListPage() {
   const navigate = useNavigate();
 
-  const [rows, setRows]           = useState<Equipment[]>([]);
-  const [total, setTotal]         = useState(0);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
-  const [search, setSearch]       = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [locFilter, setLocFilter] = useState('');
-  const [page, setPage]           = useState(1);
+  // List state
+  const [rows, setRows]         = useState<Resource[]>([]);
+  const [total, setTotal]       = useState(0);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState('');
+  const [search, setSearch]     = useState('');
+  const [typeFilter, setTypeFilter]       = useState('');
+  const [locationFilter, setLocationFilter] = useState('');
+  const [page, setPage]         = useState(1);
   const LIMIT = 50;
+
+  // Lookup data
+  const [resourceTypes, setResourceTypes] = useState<ResourceType[]>([]);
+  const [locations, setLocations]         = useState<Location[]>([]);
+  const [suppliers, setSuppliers]         = useState<Supplier[]>([]);
 
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [f, setF]                   = useState(EMPTY_FORM);
   const [saving, setSaving]         = useState(false);
   const [saveErr, setSaveErr]       = useState('');
-  const [toast, setToast]           = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Lookups
-  const [equipmentTypes, setEquipmentTypes] = useState<EquipmentType[]>([]);
-  const [locations, setLocations]           = useState<Location[]>([]);
-  const [suppliers, setSuppliers]           = useState<Supplier[]>([]);
+  // Toast
+  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Load lookups once
-  useEffect(() => {
-    api.get<EquipmentType[]>('/protected/work-center-types').then(setEquipmentTypes).catch(() => {});
-    api.get<Location[]>('/protected/locations').then(setLocations).catch(() => {});
-    api.get<{ data: Supplier[] }>('/protected/suppliers?limit=500').then(r => setSuppliers(r.data)).catch(() => {});
-  }, []);
+  function flash(text: string, type: 'success' | 'error' = 'success') {
+    setToast({ text, type });
+    if (type === 'success') setTimeout(() => setToast(null), 3500);
+  }
+
+  // ── Load list ─────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(LIMIT) });
-      if (search)     params.set('search', search);
-      if (typeFilter) params.set('equipmentTypeId', typeFilter);
-      if (locFilter)  params.set('locationId', locFilter);
-      const res = await api.get<{ data: Equipment[]; total: number }>(`/protected/equipment?${params}`);
+      if (search)         params.set('search', search);
+      if (typeFilter)     params.set('resourceTypeId', typeFilter);
+      if (locationFilter) params.set('locationId', locationFilter);
+      const res = await api.get<{ data: Resource[]; total: number }>(`/protected/resources?${params}`);
       setRows(res.data);
       setTotal(res.total);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
-  }, [search, typeFilter, locFilter, page]);
+  }, [search, typeFilter, locationFilter, page]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [search, typeFilter, locFilter]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, locationFilter]);
 
-  // ── Drawer helpers ──
+  // ── Load lookups ──────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    api.get<ResourceType[]>('/protected/resource-types').then(setResourceTypes).catch(() => {});
+    api.get<Location[]>('/protected/locations').then(setLocations).catch(() => {});
+    api.get<{ data: Supplier[] }>('/protected/suppliers?limit=500').then(r => setSuppliers(r.data)).catch(() => {});
+  }, []);
+
+  const pages = Math.max(1, Math.ceil(total / LIMIT));
+
+  // ── Drawer handlers ───────────────────────────────────────────────────────
+
   function openNew() {
-    setF(EMPTY_FORM);
-    setSaveErr('');
-    setDrawerOpen(true);
+    setF(EMPTY_FORM); setSaveErr(''); setDrawerOpen(true);
   }
 
-  const set = (k: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-    setF(prev => ({ ...prev, [k]: e.target.value }));
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setF(p => ({ ...p, [k]: e.target.value }));
 
   async function save() {
-    if (!f.name.trim()) { setSaveErr('Name is required'); return; }
-    if (!f.equipmentTypeId) { setSaveErr('Equipment type is required'); return; }
-    if (!f.locationId) { setSaveErr('Location is required'); return; }
+    if (!f.name.trim())        { setSaveErr('Name is required'); return; }
+    if (!f.resourceTypeId)     { setSaveErr('Resource Type is required'); return; }
+    if (!f.locationId)         { setSaveErr('Location is required'); return; }
     setSaving(true); setSaveErr('');
     try {
       const body: Record<string, unknown> = {
         name: f.name.trim(),
-        equipmentTypeId: parseInt(f.equipmentTypeId),
+        resourceTypeId: parseInt(f.resourceTypeId),
         locationId: parseInt(f.locationId),
         manufacturer: f.manufacturer.trim() || null,
         modelNumber: f.modelNumber.trim() || null,
@@ -152,57 +172,61 @@ export function EquipmentListPage() {
         partsSupplierId: f.partsSupplierId ? parseInt(f.partsSupplierId) : null,
         notes: f.notes.trim() || null,
       };
-      const eq = await api.post<{ id: number }>('/protected/equipment', body);
+      const created = await api.post<{ id: number }>('/protected/resources', body);
+      flash('Resource created.');
       setDrawerOpen(false);
-      flash('Equipment created.', 'success');
-      navigate(`/equipment/${eq.id}`);
+      navigate(`/resources/${created.id}`);
     } catch (e: any) { setSaveErr(e.message); }
     finally { setSaving(false); }
   }
 
-  function flash(text: string, type: 'success' | 'error') {
-    setToast({ text, type });
-    if (type === 'success') setTimeout(() => setToast(null), 4000);
-  }
-
-  const pages = Math.max(1, Math.ceil(total / LIMIT));
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <Layout>
-      {/* Header */}
+      {/* Page header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Equipment</h1>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Resources</h1>
           <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: '0.25rem 0 0' }}>
-            Machines and production assets — {total} on record
+            Machines and production assets &mdash; {total} on record
           </p>
         </div>
-        <button style={btnPrimary} onClick={openNew}>+ New Equipment</button>
+        <button style={btnPrimary} onClick={openNew}>+ New Resource</button>
       </div>
 
-      {toast && <Toast msg={toast.text} type={toast.type} />}
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          background: toast.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.10)',
+          border: `1px solid ${toast.type === 'success' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          borderRadius: 8, padding: '0.65rem 1rem', marginBottom: '1rem', fontSize: '0.85rem',
+          color: toast.type === 'success' ? '#22c55e' : c.danger,
+        }}>{toast.text}</div>
+      )}
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 10, marginBottom: '1.25rem', flexWrap: 'wrap' }}>
         <input
-          style={{ ...inputStyle, maxWidth: 260 }}
-          placeholder="Search name, serial#..."
+          style={{ ...inputStyle, maxWidth: 240 }}
+          placeholder="Search name, model, serial..."
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <select style={{ ...inputStyle, maxWidth: 200, cursor: 'pointer' }} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+        <select style={{ ...inputStyle, maxWidth: 180, cursor: 'pointer' }} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
           <option value="">All types</option>
-          {equipmentTypes.map(t => <option key={t.id} value={t.id}>{t.typeName}</option>)}
+          {resourceTypes.map(rt => <option key={rt.id} value={rt.id}>{rt.typeName}</option>)}
         </select>
-        <select style={{ ...inputStyle, maxWidth: 180, cursor: 'pointer' }} value={locFilter} onChange={e => setLocFilter(e.target.value)}>
+        <select style={{ ...inputStyle, maxWidth: 180, cursor: 'pointer' }} value={locationFilter} onChange={e => setLocationFilter(e.target.value)}>
           <option value="">All locations</option>
           {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
         </select>
-        {(search || typeFilter || locFilter) && (
-          <button style={btnSecondary} onClick={() => { setSearch(''); setTypeFilter(''); setLocFilter(''); }}>Clear</button>
+        {(search || typeFilter || locationFilter) && (
+          <button style={btnSecondary} onClick={() => { setSearch(''); setTypeFilter(''); setLocationFilter(''); }}>Clear</button>
         )}
       </div>
 
+      {/* Error */}
       {error && (
         <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '1rem', color: c.danger, fontSize: '0.875rem' }}>
           {error}
@@ -224,29 +248,33 @@ export function EquipmentListPage() {
               <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>
-                {search || typeFilter || locFilter ? 'No equipment matches your filters.' : 'No equipment yet.'}
-              </td></tr>
+              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No resources found.</td></tr>
             )}
             {!loading && rows.map(r => {
-              const badge = typeBadgeColor(r.equipmentType.typeKey);
+              const badge = typeBadgeColor(r.resourceType.typeKey);
               return (
                 <tr
                   key={r.id}
-                  onClick={() => navigate(`/equipment/${r.id}`)}
+                  onClick={() => navigate(`/resources/${r.id}`)}
                   style={{ borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', transition: 'background 0.1s' }}
                   onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: c.textPrimary }}>{r.name}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 500 }}>{r.name}</td>
                   <td style={{ padding: '0.75rem 1rem' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: 4, background: badge.bg, color: badge.color }}>{r.equipmentType.typeName}</span>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: 4, background: badge.bg, color: badge.color }}>
+                      {r.resourceType.typeName}
+                    </span>
                   </td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.location.name}</td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.manufacturer ?? '\u2014'}</td>
                   <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.modelNumber ?? '\u2014'}</td>
                   <td style={{ padding: '0.75rem 1rem' }}>
-                    <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: r.isActive ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)', color: r.isActive ? '#22c55e' : '#64748b' }}>
+                    <span style={{
+                      fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4,
+                      background: r.isActive ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)',
+                      color: r.isActive ? '#22c55e' : '#64748b',
+                    }}>
                       {r.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </td>
@@ -266,26 +294,23 @@ export function EquipmentListPage() {
         </div>
       )}
 
-      {/* New Equipment Drawer */}
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="New Equipment" width={560}>
+      {/* New Resource drawer */}
+      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title="New Resource" width={520}>
         {saveErr && (
           <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.65rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', color: c.danger }}>
             {saveErr}
           </div>
         )}
 
-        {/* General */}
-        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.75rem', paddingBottom: '0.4rem', borderBottom: `1px solid ${c.divider}` }}>
-          General
-        </div>
+        <SectionHeader label="General" />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1.25rem' }}>
           <Field label="Name *" full>
-            <input style={inputStyle} value={f.name} onChange={set('name')} placeholder="Flexo Folder Gluer #1" />
+            <input style={inputStyle} value={f.name} onChange={set('name')} placeholder="Corrugator #1" />
           </Field>
-          <Field label="Equipment Type *">
-            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.equipmentTypeId} onChange={set('equipmentTypeId')}>
+          <Field label="Resource Type *">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.resourceTypeId} onChange={set('resourceTypeId')}>
               <option value="">-- Select --</option>
-              {equipmentTypes.map(t => <option key={t.id} value={t.id}>{t.typeName}</option>)}
+              {resourceTypes.map(rt => <option key={rt.id} value={rt.id}>{rt.typeName}</option>)}
             </select>
           </Field>
           <Field label="Location *">
@@ -296,13 +321,10 @@ export function EquipmentListPage() {
           </Field>
         </div>
 
-        {/* Manufacturer Info */}
-        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: '0.5rem', paddingBottom: '0.4rem', borderBottom: `1px solid ${c.divider}` }}>
-          Manufacturer Info
-        </div>
+        <SectionHeader label="Manufacturer Info" />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1.25rem' }}>
           <Field label="Manufacturer">
-            <input style={inputStyle} value={f.manufacturer} onChange={set('manufacturer')} placeholder="Bobst" />
+            <input style={inputStyle} value={f.manufacturer} onChange={set('manufacturer')} />
           </Field>
           <Field label="Model Number">
             <input style={inputStyle} value={f.modelNumber} onChange={set('modelNumber')} />
@@ -311,14 +333,11 @@ export function EquipmentListPage() {
             <input style={inputStyle} value={f.serialNumber} onChange={set('serialNumber')} />
           </Field>
           <Field label="Year of Manufacture">
-            <input style={inputStyle} type="number" value={f.yearOfManufacture} onChange={set('yearOfManufacture')} placeholder="2018" />
+            <input style={inputStyle} type="number" value={f.yearOfManufacture} onChange={set('yearOfManufacture')} placeholder="2020" />
           </Field>
         </div>
 
-        {/* Sheet Capabilities */}
-        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: '0.5rem', paddingBottom: '0.4rem', borderBottom: `1px solid ${c.divider}` }}>
-          Sheet Capabilities
-        </div>
+        <SectionHeader label="Sheet Capabilities" />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1.25rem' }}>
           <Field label="Max Sheet Width (in)">
             <input style={inputStyle} type="number" step="0.01" value={f.maxSheetWidth} onChange={set('maxSheetWidth')} />
@@ -333,20 +352,17 @@ export function EquipmentListPage() {
             <input style={inputStyle} type="number" step="0.01" value={f.minSheetLength} onChange={set('minSheetLength')} />
           </Field>
           <Field label="Max Speed (pcs/hr)">
-            <input style={inputStyle} type="number" value={f.maxSpeed} onChange={set('maxSpeed')} />
+            <input style={inputStyle} type="number" step="1" value={f.maxSpeed} onChange={set('maxSpeed')} />
           </Field>
         </div>
 
-        {/* Procurement */}
-        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: '0.75rem', marginTop: '0.5rem', paddingBottom: '0.4rem', borderBottom: `1px solid ${c.divider}` }}>
-          Procurement
-        </div>
+        <SectionHeader label="Procurement" />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1.25rem' }}>
           <Field label="Purchase Date">
             <input style={inputStyle} type="date" value={f.purchaseDate} onChange={set('purchaseDate')} />
           </Field>
-          <Field label="Purchase Price ($)">
-            <input style={inputStyle} type="number" step="0.01" value={f.purchasePrice} onChange={set('purchasePrice')} />
+          <Field label="Purchase Price">
+            <input style={inputStyle} type="number" step="0.01" value={f.purchasePrice} onChange={set('purchasePrice')} placeholder="0.00" />
           </Field>
           <Field label="Warranty Expiry">
             <input style={inputStyle} type="date" value={f.warrantyExpiry} onChange={set('warrantyExpiry')} />
@@ -362,13 +378,13 @@ export function EquipmentListPage() {
           </Field>
         </div>
 
-        {/* Notes */}
-        <Field label="Notes">
-          <textarea style={{ ...inputStyle, height: 64, resize: 'vertical' }} value={f.notes} onChange={set('notes')} />
+        <SectionHeader label="Notes" />
+        <Field label="Notes" full>
+          <textarea style={{ ...inputStyle, height: 72, resize: 'vertical' }} value={f.notes} onChange={set('notes')} />
         </Field>
 
         <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>
-          <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Creating...' : 'Create Equipment'}</button>
+          <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Create Resource'}</button>
           <button style={btnSecondary} onClick={() => setDrawerOpen(false)}>Cancel</button>
         </div>
       </Drawer>

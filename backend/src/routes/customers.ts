@@ -1,6 +1,7 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { ContactType } from '@prisma/client';
 import prisma from '../prisma';
+import { requireRole } from '../middleware/auth';
 
 const router = Router();
 
@@ -42,9 +43,14 @@ router.get('/', async (req, res) => {
       skip: (pageNum - 1) * limitNum,
       take: limitNum,
       include: {
-        paymentTerm:    { select: { id: true, termName: true } },
+        party: {
+          include: {
+            contacts: { where: { isPrimary: true, isActive: true }, take: 1 },
+          },
+        },
+        paymentTerm:     { select: { id: true, termName: true } },
         defaultSalesRep: { select: { id: true, name: true } },
-        _count: { select: { contacts: true, orders: true, shipToAddresses: true } },
+        _count: { select: { orders: true } },
       },
     }),
     prisma.customer.count({ where: where as any }),
@@ -60,21 +66,31 @@ router.get('/:id', async (req, res) => {
   const customer = await prisma.customer.findUnique({
     where: { id },
     include: {
-      paymentTerm:    { select: { id: true, termCode: true, termName: true, netDays: true } },
+      party: {
+        include: {
+          contacts: {
+            where:   { isActive: true },
+            orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }],
+          },
+        },
+      },
+      paymentTerm:     { select: { id: true, termCode: true, termName: true, netDays: true } },
       defaultSalesRep: { select: { id: true, name: true } },
-      contacts: {
-        where:   { isActive: true },
-        orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }],
-      },
-      shipToAddresses: {
-        where:   { isActive: true },
-        orderBy: [{ isDefault: 'desc' }, { locationName: 'asc' }],
-      },
       _count: { select: { orders: true, invoices: true } },
     },
   });
   if (!customer) { res.status(404).json({ error: 'Customer not found' }); return; }
-  res.json(customer);
+
+  // Fetch ship-to locations via partyId
+  let shipToLocations: any[] = [];
+  if (customer.partyId) {
+    shipToLocations = await prisma.location.findMany({
+      where: { partyId: customer.partyId, locationType: 'CUSTOMER', isActive: true },
+      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+    });
+  }
+
+  res.json({ ...customer, shipToLocations });
 });
 
 // ── POST /api/protected/customers ────────────────────────────────────────────
@@ -89,6 +105,7 @@ router.post('/', async (req, res) => {
       data: {
         code,
         name:                    String(b.name).trim(),
+        partyId:                 b.partyId != null            ? Number(b.partyId)                        : null,
         accountNumber:           b.accountNumber           ? String(b.accountNumber).trim()           : null,
         taxId:                   b.taxId                   ? String(b.taxId).trim()                   : null,
         resaleCertificateNumber: b.resaleCertificateNumber ? String(b.resaleCertificateNumber).trim() : null,
@@ -131,6 +148,7 @@ router.put('/:id', async (req, res) => {
     const d: Record<string, unknown> = {};
     if (b.code                    !== undefined) d.code                    = String(b.code).trim().toUpperCase();
     if (b.name                    !== undefined) d.name                    = String(b.name).trim();
+    if (b.partyId                 !== undefined) d.partyId                 = b.partyId != null ? Number(b.partyId) : null;
     if (b.accountNumber           !== undefined) d.accountNumber           = b.accountNumber           ? String(b.accountNumber).trim()           : null;
     if (b.taxId                   !== undefined) d.taxId                   = b.taxId                   ? String(b.taxId).trim()                   : null;
     if (b.resaleCertificateNumber !== undefined) d.resaleCertificateNumber = b.resaleCertificateNumber ? String(b.resaleCertificateNumber).trim() : null;
@@ -164,7 +182,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // ── DELETE /api/protected/customers/:id (soft delete) ────────────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('ADMIN'), async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
@@ -184,41 +202,54 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CUSTOMER CONTACTS sub-resource
+// CONTACTS sub-resource  (PartyContact via customer.partyId)
 // ─────────────────────────────────────────────────────────────────────────────
 
-router.get('/:id/contacts', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+/** Resolve customer → partyId, or send 404/400 and return null */
+async function resolvePartyId(req: Request, res: Response): Promise<number | null> {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return null; }
 
-  const contacts = await prisma.customerContact.findMany({
-    where:   { customerId, isActive: true },
+  const customer = await prisma.customer.findUnique({
+    where: { id },
+    select: { partyId: true },
+  });
+  if (!customer) { res.status(404).json({ error: 'Customer not found' }); return null; }
+  if (!customer.partyId) { res.status(400).json({ error: 'Customer has no linked party — create or assign a party first' }); return null; }
+  return customer.partyId;
+}
+
+router.get('/:id/contacts', async (req, res) => {
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
+
+  const contacts = await prisma.partyContact.findMany({
+    where:   { partyId, isActive: true },
     orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }],
   });
   res.json(contacts);
 });
 
 router.post('/:id/contacts', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
 
   const { name, title, email, phone, contactType, isPrimary, invoiceDistribution } =
     req.body as Record<string, unknown>;
 
-  if (!String(name ?? '').trim()) { res.status(400).json({ error: 'name is required' }); return; }
   if (!contactType || !CONTACT_TYPES.includes(contactType as ContactType)) {
     res.status(400).json({ error: `contactType must be one of: ${CONTACT_TYPES.join(', ')}` }); return;
   }
 
   try {
     if (isPrimary) {
-      await prisma.customerContact.updateMany({ where: { customerId, isPrimary: true }, data: { isPrimary: false } });
+      await prisma.partyContact.updateMany({ where: { partyId, isPrimary: true }, data: { isPrimary: false } });
     }
 
-    const contact = await prisma.customerContact.create({
+    const contact = await prisma.partyContact.create({
       data: {
-        customerId,
-        name:                String(name).trim(),
+        partyId,
+        name:                name ? String(name).trim() : null,
         title:               title ? String(title).trim() : null,
         email:               email ? String(email).trim() : null,
         phone:               phone ? String(phone).trim() : null,
@@ -229,16 +260,18 @@ router.post('/:id/contacts', async (req, res) => {
     });
     res.status(201).json(contact);
   } catch (err: any) {
-    if (err.code === 'P2003') { res.status(404).json({ error: 'Customer not found' }); return; }
+    if (err.code === 'P2003') { res.status(404).json({ error: 'Party not found' }); return; }
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 router.put('/:id/contacts/:contactId', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  const contactId  = parseInt(req.params.contactId);
-  if (isNaN(customerId) || isNaN(contactId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
+
+  const contactId = parseInt(req.params.contactId);
+  if (isNaN(contactId)) { res.status(400).json({ error: 'Invalid contact ID' }); return; }
 
   const b = req.body as Record<string, unknown>;
 
@@ -247,15 +280,15 @@ router.put('/:id/contacts/:contactId', async (req, res) => {
   }
 
   try {
-    const existing = await prisma.customerContact.findFirst({ where: { id: contactId, customerId } });
-    if (!existing) { res.status(404).json({ error: 'Contact not found' }); return; }
+    const existing = await prisma.partyContact.findFirst({ where: { id: contactId, partyId } });
+    if (!existing) { res.status(404).json({ error: 'Contact not found for this customer' }); return; }
 
-    if (b.isPrimary) {
-      await prisma.customerContact.updateMany({ where: { customerId, isPrimary: true, id: { not: contactId } }, data: { isPrimary: false } });
+    if (b.isPrimary && !existing.isPrimary) {
+      await prisma.partyContact.updateMany({ where: { partyId, isPrimary: true, id: { not: contactId } }, data: { isPrimary: false } });
     }
 
     const d: Record<string, unknown> = {};
-    if (b.name                !== undefined) d.name                = String(b.name).trim();
+    if (b.name                !== undefined) d.name                = b.name ? String(b.name).trim() : null;
     if (b.title               !== undefined) d.title               = b.title ? String(b.title).trim() : null;
     if (b.email               !== undefined) d.email               = b.email ? String(b.email).trim() : null;
     if (b.phone               !== undefined) d.phone               = b.phone ? String(b.phone).trim() : null;
@@ -264,7 +297,7 @@ router.put('/:id/contacts/:contactId', async (req, res) => {
     if (b.invoiceDistribution !== undefined) d.invoiceDistribution = Boolean(b.invoiceDistribution);
     if (b.isActive            !== undefined) d.isActive            = Boolean(b.isActive);
 
-    const contact = await prisma.customerContact.update({ where: { id: contactId }, data: d as any });
+    const contact = await prisma.partyContact.update({ where: { id: contactId }, data: d as any });
     res.json(contact);
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Contact not found' }); return; }
@@ -273,13 +306,15 @@ router.put('/:id/contacts/:contactId', async (req, res) => {
 });
 
 router.delete('/:id/contacts/:contactId', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  const contactId  = parseInt(req.params.contactId);
-  if (isNaN(customerId) || isNaN(contactId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
+
+  const contactId = parseInt(req.params.contactId);
+  if (isNaN(contactId)) { res.status(400).json({ error: 'Invalid contact ID' }); return; }
 
   try {
-    const result = await prisma.customerContact.updateMany({ where: { id: contactId, customerId }, data: { isActive: false } });
-    if (result.count === 0) { res.status(404).json({ error: 'Contact not found' }); return; }
+    const result = await prisma.partyContact.updateMany({ where: { id: contactId, partyId }, data: { isActive: false } });
+    if (result.count === 0) { res.status(404).json({ error: 'Contact not found for this customer' }); return; }
     res.status(204).send();
   } catch {
     res.status(500).json({ error: 'Internal server error' });
@@ -287,99 +322,117 @@ router.delete('/:id/contacts/:contactId', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHIP-TO ADDRESSES sub-resource
+// SHIP-TO ADDRESSES sub-resource  (Location with locationType CUSTOMER)
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.get('/:id/ship-to', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
 
-  const addresses = await prisma.shipToAddress.findMany({
-    where:   { customerId, isActive: true },
-    orderBy: [{ isDefault: 'desc' }, { locationName: 'asc' }],
+  const locations = await prisma.location.findMany({
+    where:   { partyId, locationType: 'CUSTOMER', isActive: true },
+    orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
   });
-  res.json(addresses);
+  res.json(locations);
 });
 
 router.post('/:id/ship-to', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  if (isNaN(customerId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
 
   const b = req.body as Record<string, unknown>;
-  if (!String(b.locationName ?? '').trim()) { res.status(400).json({ error: 'locationName is required' }); return; }
+  if (!String(b.name ?? '').trim()) { res.status(400).json({ error: 'name is required' }); return; }
 
   try {
     if (b.isDefault) {
-      await prisma.shipToAddress.updateMany({ where: { customerId, isDefault: true }, data: { isDefault: false } });
+      await prisma.location.updateMany({ where: { partyId, locationType: 'CUSTOMER', isDefault: true }, data: { isDefault: false } });
     }
-    const addr = await prisma.shipToAddress.create({
+
+    const location = await prisma.location.create({
       data: {
-        customerId,
-        locationName:         String(b.locationName).trim(),
+        name:                 String(b.name).trim(),
+        locationType:         'CUSTOMER',
+        partyId,
+        isRegistered:         b.isRegistered != null ? Boolean(b.isRegistered) : false,
+        isDefault:            b.isDefault != null ? Boolean(b.isDefault) : false,
         street:               b.street               ? String(b.street).trim()               : null,
         city:                 b.city                 ? String(b.city).trim()                 : null,
         state:                b.state                ? String(b.state).trim()                : null,
         zip:                  b.zip                  ? String(b.zip).trim()                  : null,
         country:              b.country              ? String(b.country).trim()              : 'US',
+        phone:                b.phone                ? String(b.phone).trim()                : null,
+        email:                b.email                ? String(b.email).trim()                : null,
         contactName:          b.contactName          ? String(b.contactName).trim()          : null,
         contactPhone:         b.contactPhone         ? String(b.contactPhone).trim()         : null,
         contactEmail:         b.contactEmail         ? String(b.contactEmail).trim()         : null,
-        isDefault:            b.isDefault != null ? Boolean(b.isDefault) : false,
         deliveryInstructions: b.deliveryInstructions ? String(b.deliveryInstructions).trim() : null,
       },
     });
-    res.status(201).json(addr);
+    res.status(201).json(location);
   } catch (err: any) {
-    if (err.code === 'P2003') { res.status(404).json({ error: 'Customer not found' }); return; }
+    if (err.code === 'P2002') { res.status(409).json({ error: 'A location with that name already exists' }); return; }
+    if (err.code === 'P2003') { res.status(400).json({ error: 'Invalid foreign key reference' }); return; }
+    console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 router.put('/:id/ship-to/:addrId', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  const addrId     = parseInt(req.params.addrId);
-  if (isNaN(customerId) || isNaN(addrId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
+
+  const addrId = parseInt(req.params.addrId);
+  if (isNaN(addrId)) { res.status(400).json({ error: 'Invalid address ID' }); return; }
 
   const b = req.body as Record<string, unknown>;
 
   try {
-    const existing = await prisma.shipToAddress.findFirst({ where: { id: addrId, customerId } });
-    if (!existing) { res.status(404).json({ error: 'Ship-to address not found' }); return; }
+    const existing = await prisma.location.findFirst({ where: { id: addrId, partyId, locationType: 'CUSTOMER' } });
+    if (!existing) { res.status(404).json({ error: 'Ship-to address not found for this customer' }); return; }
 
-    if (b.isDefault) {
-      await prisma.shipToAddress.updateMany({ where: { customerId, isDefault: true, id: { not: addrId } }, data: { isDefault: false } });
+    if (b.isDefault && !existing.isDefault) {
+      await prisma.location.updateMany({ where: { partyId, locationType: 'CUSTOMER', isDefault: true, id: { not: addrId } }, data: { isDefault: false } });
     }
 
     const d: Record<string, unknown> = {};
-    if (b.locationName         !== undefined) d.locationName         = String(b.locationName).trim();
+    if (b.name                 !== undefined) d.name                 = String(b.name).trim();
+    if (b.isDefault            !== undefined) d.isDefault            = Boolean(b.isDefault);
+    if (b.isRegistered         !== undefined) d.isRegistered         = Boolean(b.isRegistered);
     if (b.street               !== undefined) d.street               = b.street               ? String(b.street).trim()               : null;
     if (b.city                 !== undefined) d.city                 = b.city                 ? String(b.city).trim()                 : null;
     if (b.state                !== undefined) d.state                = b.state                ? String(b.state).trim()                : null;
     if (b.zip                  !== undefined) d.zip                  = b.zip                  ? String(b.zip).trim()                  : null;
     if (b.country              !== undefined) d.country              = b.country              ? String(b.country).trim()              : null;
+    if (b.phone                !== undefined) d.phone                = b.phone                ? String(b.phone).trim()                : null;
+    if (b.email                !== undefined) d.email                = b.email                ? String(b.email).trim()                : null;
     if (b.contactName          !== undefined) d.contactName          = b.contactName          ? String(b.contactName).trim()          : null;
     if (b.contactPhone         !== undefined) d.contactPhone         = b.contactPhone         ? String(b.contactPhone).trim()         : null;
     if (b.contactEmail         !== undefined) d.contactEmail         = b.contactEmail         ? String(b.contactEmail).trim()         : null;
-    if (b.isDefault            !== undefined) d.isDefault            = Boolean(b.isDefault);
     if (b.deliveryInstructions !== undefined) d.deliveryInstructions = b.deliveryInstructions ? String(b.deliveryInstructions).trim() : null;
     if (b.isActive             !== undefined) d.isActive             = Boolean(b.isActive);
 
-    const addr = await prisma.shipToAddress.update({ where: { id: addrId }, data: d as any });
-    res.json(addr);
+    const location = await prisma.location.update({ where: { id: addrId }, data: d as any });
+    res.json(location);
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Address not found' }); return; }
+    if (err.code === 'P2002') { res.status(409).json({ error: 'A location with that name already exists' }); return; }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 router.delete('/:id/ship-to/:addrId', async (req, res) => {
-  const customerId = parseInt(req.params.id);
-  const addrId     = parseInt(req.params.addrId);
-  if (isNaN(customerId) || isNaN(addrId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await resolvePartyId(req, res);
+  if (partyId === null) return;
+
+  const addrId = parseInt(req.params.addrId);
+  if (isNaN(addrId)) { res.status(400).json({ error: 'Invalid address ID' }); return; }
 
   try {
-    const result = await prisma.shipToAddress.updateMany({ where: { id: addrId, customerId }, data: { isActive: false } });
-    if (result.count === 0) { res.status(404).json({ error: 'Address not found' }); return; }
+    const result = await prisma.location.updateMany({
+      where: { id: addrId, partyId, locationType: 'CUSTOMER' },
+      data:  { isActive: false },
+    });
+    if (result.count === 0) { res.status(404).json({ error: 'Ship-to address not found for this customer' }); return; }
     res.status(204).send();
   } catch {
     res.status(500).json({ error: 'Internal server error' });

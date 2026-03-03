@@ -9,17 +9,19 @@ import authRouter              from './routes/auth';
 import customersRouter         from './routes/customers';
 import suppliersRouter         from './routes/suppliers';
 import locationsRouter         from './routes/locations';
-import workCentersRouter       from './routes/workCenters';
 import materialsRouter         from './routes/materials';
 import productCategoriesRouter from './routes/productCategories';
-import productsRouter          from './routes/products';
+import masterSpecsRouter       from './routes/masterSpecs';
+import customerItemsRouter     from './routes/customerItems';
 import toolingRouter           from './routes/tooling';
 import inventoryRouter         from './routes/inventory';
 import paymentTermsRouter      from './routes/paymentTerms';
 import materialTypesRouter     from './routes/materialTypes';
-import workCenterTypesRouter   from './routes/workCenterTypes';
-import equipmentRouter         from './routes/equipment';
+import resourceTypesRouter     from './routes/resourceTypes';
+import resourcesRouter         from './routes/resources';
 import operationsRouter        from './routes/operations';
+import productModulesRouter    from './routes/productModules';
+import partiesRouter           from './routes/parties';
 
 dotenv.config();
 
@@ -54,23 +56,25 @@ app.use('/api/protected', requireAuth);
 app.use('/api/protected/customers',          customersRouter);
 app.use('/api/protected/suppliers',          suppliersRouter);
 app.use('/api/protected/locations',          locationsRouter);
-app.use('/api/protected/work-centers',       workCentersRouter);
 app.use('/api/protected/materials',          materialsRouter);
 app.use('/api/protected/product-categories', productCategoriesRouter);
+app.use('/api/protected/parties',            partiesRouter);
 
 // Products & catalog
-app.use('/api/protected/products',           productsRouter);
+app.use('/api/protected/master-specs',       masterSpecsRouter);
+app.use('/api/protected/customer-items',     customerItemsRouter);
 app.use('/api/protected/tooling',            toolingRouter);
 app.use('/api/protected/inventory',          inventoryRouter);
+
+// Resources & operations
+app.use('/api/protected/resources',          resourcesRouter);
+app.use('/api/protected/operations',         operationsRouter);
 
 // Admin lookups
 app.use('/api/protected/payment-terms',      paymentTermsRouter);
 app.use('/api/protected/material-types',     materialTypesRouter);
-app.use('/api/protected/work-center-types',  workCenterTypesRouter);
-
-// Operations & equipment
-app.use('/api/protected/equipment',          equipmentRouter);
-app.use('/api/protected/operations',         operationsRouter);
+app.use('/api/protected/resource-types',     resourceTypesRouter);
+app.use('/api/protected/product-modules',    productModulesRouter);
 
 // ── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

@@ -13,22 +13,23 @@ const NAV_SECTIONS = [
       { path: '/customers',          label: 'Customers' },
       { path: '/suppliers',          label: 'Suppliers' },
       { path: '/locations',          label: 'Locations' },
-      { path: '/work-centers',       label: 'Work Centers' },
+      { path: '/parties',            label: 'Parties' },
       { path: '/materials',          label: 'Materials' },
-      { path: '/product-categories', label: 'Product Categories' },
+      { path: '/product-categories', label: 'Categories' },
     ],
   },
   {
     section: 'Products',
     items: [
-      { path: '/products', label: 'Products' },
-      { path: '/tooling',  label: 'Tooling' },
+      { path: '/master-specs',    label: 'Master Specs' },
+      { path: '/customer-items',  label: 'Customer Items' },
+      { path: '/tooling',         label: 'Tooling' },
     ],
   },
   {
-    section: 'Production',
+    section: 'Resources',
     items: [
-      { path: '/equipment',  label: 'Equipment' },
+      { path: '/resources',  label: 'Resources' },
       { path: '/operations', label: 'Operations' },
     ],
   },
@@ -36,15 +37,15 @@ const NAV_SECTIONS = [
     section: 'Inventory',
     items: [
       { path: '/inventory', label: 'Inventory' },
-      { path: '/transfers', label: 'Transfers' },
     ],
   },
   {
     section: 'Admin Settings',
     items: [
-      { path: '/admin/payment-terms',     label: 'Payment Terms' },
-      { path: '/admin/material-types',    label: 'Material Types' },
-      { path: '/admin/work-center-types', label: 'Work Center Types' },
+      { path: '/admin/payment-terms',    label: 'Payment Terms' },
+      { path: '/admin/material-types',   label: 'Material Types' },
+      { path: '/admin/resource-types',   label: 'Resource Types' },
+      { path: '/admin/product-modules',  label: 'Product Modules' },
     ],
   },
 ];

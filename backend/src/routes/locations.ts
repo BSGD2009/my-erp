@@ -22,7 +22,8 @@ router.get('/:id', async (req, res) => {
   const location = await prisma.location.findUnique({
     where: { id },
     include: {
-      _count: { select: { inventory: true, equipment: true, workCenters: true } },
+      party: { select: { id: true, partyCode: true, name: true } },
+      _count: { select: { inventory: true, resources: true } },
     },
   });
   if (!location) { res.status(404).json({ error: 'Location not found' }); return; }
@@ -52,8 +53,13 @@ router.post('/', async (req, res) => {
         state:        b.state   ? String(b.state).trim()   : null,
         zip:          b.zip     ? String(b.zip).trim()     : null,
         country:      b.country ? String(b.country).trim() : 'US',
-        phone:        b.phone   ? String(b.phone).trim()   : null,
-        email:        b.email   ? String(b.email).trim()   : null,
+        phone:                b.phone                ? String(b.phone).trim()                : null,
+        email:                b.email                ? String(b.email).trim()                : null,
+        partyId:              b.partyId != null      ? Number(b.partyId)                     : null,
+        contactName:          b.contactName          ? String(b.contactName).trim()          : null,
+        contactPhone:         b.contactPhone         ? String(b.contactPhone).trim()         : null,
+        contactEmail:         b.contactEmail         ? String(b.contactEmail).trim()         : null,
+        deliveryInstructions: b.deliveryInstructions ? String(b.deliveryInstructions).trim() : null,
       },
     });
     res.status(201).json(location);
@@ -88,9 +94,14 @@ router.put('/:id', async (req, res) => {
     if (b.state        !== undefined) d.state        = b.state   ? String(b.state).trim()   : null;
     if (b.zip          !== undefined) d.zip          = b.zip     ? String(b.zip).trim()     : null;
     if (b.country      !== undefined) d.country      = b.country ? String(b.country).trim() : null;
-    if (b.phone        !== undefined) d.phone        = b.phone   ? String(b.phone).trim()   : null;
-    if (b.email        !== undefined) d.email        = b.email   ? String(b.email).trim()   : null;
-    if (b.isActive     !== undefined) d.isActive     = Boolean(b.isActive);
+    if (b.phone                !== undefined) d.phone                = b.phone                ? String(b.phone).trim()                : null;
+    if (b.email                !== undefined) d.email                = b.email                ? String(b.email).trim()                : null;
+    if (b.partyId              !== undefined) d.partyId              = b.partyId != null      ? Number(b.partyId)                     : null;
+    if (b.contactName          !== undefined) d.contactName          = b.contactName          ? String(b.contactName).trim()          : null;
+    if (b.contactPhone         !== undefined) d.contactPhone         = b.contactPhone         ? String(b.contactPhone).trim()         : null;
+    if (b.contactEmail         !== undefined) d.contactEmail         = b.contactEmail         ? String(b.contactEmail).trim()         : null;
+    if (b.deliveryInstructions !== undefined) d.deliveryInstructions = b.deliveryInstructions ? String(b.deliveryInstructions).trim() : null;
+    if (b.isActive             !== undefined) d.isActive             = Boolean(b.isActive);
 
     const location = await prisma.location.update({ where: { id }, data: d as any });
     res.json(location);

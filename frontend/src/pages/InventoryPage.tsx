@@ -6,11 +6,11 @@ import { api } from '../api/client';
 import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle, STATUS_COLORS } from '../theme';
 
 interface MatRow { materialId: number; material: { id: number; code: string; name: string; unitOfMeasure: string; materialType?: { id: number; typeKey: string; typeName: string } }; totalQty: number; locations: Array<{ locationId: number; location: { id: number; name: string }; quantity: number; avgCost: string }> }
-interface FGRow { id: number; product: { id: number; sku: string; name: string; productType: string }; variant?: { id: number; sku: string }; location: { id: number; name: string }; quantity: string; avgCost?: string }
-interface Transfer { id: number; materialId?: number; productId?: number; quantity: string; status: string; notes?: string; transferredAt: string; material?: { id: number; code: string; name: string }; product?: { id: number; sku: string; name: string }; fromLocation: { id: number; name: string }; toLocation: { id: number; name: string }; transferredBy: { id: number; name: string } }
+interface FGRow { id: number; masterSpec: { id: number; sku: string; name: string }; variant?: { id: number; sku: string }; location: { id: number; name: string }; quantity: string; avgCost?: string }
+interface Transfer { id: number; materialId?: number; masterSpecId?: number; quantity: string; status: string; notes?: string; transferredAt: string; material?: { id: number; code: string; name: string }; masterSpec?: { id: number; sku: string; name: string }; fromLocation: { id: number; name: string }; toLocation: { id: number; name: string }; transferredBy: { id: number; name: string } }
 interface Location { id: number; name: string }
 interface Material { id: number; code: string; name: string }
-interface Product  { id: number; sku: string; name: string }
+interface MasterSpec { id: number; sku: string; name: string }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>{label}</label>{children}</div>;
@@ -151,7 +151,7 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
       <table style={{ width:'100%', borderCollapse:'collapse' }}>
         <thead>
           <tr style={{ borderBottom:`1px solid ${c.cardBorder}` }}>
-            {['Product', 'SKU', 'Variant', 'Location', 'Qty On Hand', 'Avg Cost'].map(h => (
+            {['Master Spec', 'SKU', 'Variant', 'Location', 'Qty On Hand', 'Avg Cost'].map(h => (
               <th key={h} style={{ padding:'0.75rem 1rem', textAlign:'left', fontSize:'0.7rem', fontWeight:600, color:c.textMuted, textTransform:'uppercase', letterSpacing:'0.05em' }}>{h}</th>
             ))}
           </tr>
@@ -159,11 +159,11 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
         <tbody>
           {rows.length === 0 && <tr><td colSpan={6} style={{ padding:'3rem', textAlign:'center', color:c.textMuted, fontSize:'0.875rem' }}>No finished goods inventory.</td></tr>}
           {rows.map(r => (
-            <tr key={r.id} onClick={() => navigate(`/products/${r.product.id}`)} style={{ borderBottom:`1px solid ${c.divider}`, cursor:'pointer', transition:'background 0.1s' }}
+            <tr key={r.id} onClick={() => navigate(`/master-specs/${r.masterSpec.id}`)} style={{ borderBottom:`1px solid ${c.divider}`, cursor:'pointer', transition:'background 0.1s' }}
               onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-              <td style={{ padding:'0.75rem 1rem', fontSize:'0.875rem' }}>{r.product.name}</td>
-              <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', fontSize:'0.82rem', color:c.accent }}>{r.product.sku}</td>
+              <td style={{ padding:'0.75rem 1rem', fontSize:'0.875rem' }}>{r.masterSpec.name}</td>
+              <td style={{ padding:'0.75rem 1rem', fontFamily:'monospace', fontSize:'0.82rem', color:c.accent }}>{r.masterSpec.sku}</td>
               <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.variant?.sku ?? '--'}</td>
               <td style={{ padding:'0.75rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{r.location.name}</td>
               <td style={{ padding:'0.75rem 1rem', fontSize:'0.95rem', fontWeight:700, color: Number(r.quantity) > 0 ? c.accent : c.danger }}>{Number(r.quantity).toLocaleString()}</td>
@@ -177,7 +177,7 @@ function FGInventoryTab({ navigate }: { navigate: (p: string) => void }) {
 }
 
 // ---- Transfers ----
-const XFER_EMPTY = { transferType: 'material', materialId: '', productId: '', fromLocationId: '', toLocationId: '', quantity: '', notes: '', status: 'PENDING' };
+const XFER_EMPTY = { transferType: 'material', materialId: '', masterSpecId: '', fromLocationId: '', toLocationId: '', quantity: '', notes: '', status: 'PENDING' };
 
 function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => void }) {
   const [transfers, setTransfers] = useState<Transfer[]>([]);
@@ -185,7 +185,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [locations, setLocations] = useState<Location[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [products,  setProducts]  = useState<Product[]>([]);
+  const [masterSpecs, setMasterSpecs] = useState<MasterSpec[]>([]);
   const [saving, setSaving]       = useState(false);
   const [saveErr, setSaveErr]     = useState('');
   const [f, setF]                 = useState(XFER_EMPTY);
@@ -202,7 +202,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
   useEffect(() => {
     api.get<Location[]>('/protected/locations').then(setLocations).catch(() => {});
     api.get<{ data: Material[] }>('/protected/materials?limit=500').then(r => setMaterials(r.data)).catch(() => {});
-    api.get<{ data: Product[]  }>('/protected/products?limit=500').then(r => setProducts(r.data)).catch(() => {});
+    api.get<{ data: MasterSpec[] }>('/protected/master-specs?limit=500').then(r => setMasterSpecs(r.data)).catch(() => {});
   }, []);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>) => setF(p => ({ ...p, [k]: e.target.value }));
@@ -219,8 +219,8 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
         quantity:       parseFloat(f.quantity),
         status:         f.status,
       };
-      if (f.transferType === 'material' && f.materialId) body.materialId = parseInt(f.materialId);
-      if (f.transferType === 'product'  && f.productId)  body.productId  = parseInt(f.productId);
+      if (f.transferType === 'material'    && f.materialId)   body.materialId   = parseInt(f.materialId);
+      if (f.transferType === 'masterSpec' && f.masterSpecId) body.masterSpecId = parseInt(f.masterSpecId);
       if (f.notes) body.notes = f.notes;
       await api.post('/protected/inventory/transfers', body);
       await load();
@@ -290,7 +290,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.78rem', color:c.textMuted }}>{new Date(t.transferredAt).toLocaleDateString()}</td>
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.85rem' }}>
                       {t.material ? <span><span style={{ fontFamily:'monospace', color:c.textLabel, fontSize:'0.78rem' }}>{t.material.code}</span> {t.material.name}</span>
-                                  : t.product ? <span><span style={{ fontFamily:'monospace', color:c.accent, fontSize:'0.78rem' }}>{t.product.sku}</span> {t.product.name}</span> : '--'}
+                                  : t.masterSpec ? <span><span style={{ fontFamily:'monospace', color:c.accent, fontSize:'0.78rem' }}>{t.masterSpec.sku}</span> {t.masterSpec.name}</span> : '--'}
                     </td>
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.875rem', fontWeight:600 }}>{Number(t.quantity).toLocaleString()}</td>
                     <td style={{ padding:'0.65rem 1rem', fontSize:'0.82rem', color:c.textLabel }}>{t.fromLocation.name}</td>
@@ -321,7 +321,7 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
         <div style={{ marginBottom:'1rem' }}>
           <label style={labelStyle}>Transfer Type</label>
           <div style={{ display:'flex', gap:12 }}>
-            {[['material','Raw Material'],['product','Finished Good']].map(([v,l]) => (
+            {[['material','Raw Material'],['masterSpec','Finished Good']].map(([v,l]) => (
               <label key={v} style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.85rem', color:c.textLabel, cursor:'pointer' }}>
                 <input type="radio" name="ttype" value={v} checked={f.transferType===v} onChange={set('transferType')} /> {l}
               </label>
@@ -337,10 +337,10 @@ function TransfersTab({ flash }: { flash: (m: string, t?: 'success'|'error') => 
             </select>
           </div>
         ) : (
-          <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Product *</label>
-            <select style={{ ...inputStyle, cursor:'pointer' }} value={f.productId} onChange={set('productId')}>
+          <div style={{ marginBottom:'1rem' }}><label style={labelStyle}>Master Spec *</label>
+            <select style={{ ...inputStyle, cursor:'pointer' }} value={f.masterSpecId} onChange={set('masterSpecId')}>
               <option value="">-- Select --</option>
-              {products.map(p => <option key={p.id} value={p.id}>{p.sku} -- {p.name}</option>)}
+              {masterSpecs.map(p => <option key={p.id} value={p.id}>{p.sku} -- {p.name}</option>)}
             </select>
           </div>
         )}

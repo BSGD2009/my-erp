@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import {
-  ProductType, BoxStyle, Flute, WallType, PrintType, CoatingType,
+  BoxStyle, Flute, WallType, PrintType, CoatingType,
   GrainDirection, JointType,
 } from '@prisma/client';
 import prisma from '../prisma';
 
 const router = Router();
 
-const VALID_PRODUCT_TYPES = Object.values(ProductType);
 const VALID_BOX_STYLES    = Object.values(BoxStyle);
 const VALID_FLUTES        = Object.values(Flute);
 const VALID_WALL_TYPES    = Object.values(WallType);
@@ -16,9 +15,20 @@ const VALID_COATINGS      = Object.values(CoatingType);
 const VALID_GRAINS        = Object.values(GrainDirection);
 const VALID_JOINTS        = Object.values(JointType);
 
-// ── GET /api/protected/products ───────────────────────────────────────────────
+// Auto-generate SKU from name: first 4 letters + 2-digit number
+async function generateSku(name: string): Promise<string> {
+  const prefix = name.replace(/[^A-Za-z]/g, '').substring(0, 4).toUpperCase().padEnd(4, 'X');
+  for (let i = 1; i <= 99; i++) {
+    const sku = `${prefix}${String(i).padStart(2, '0')}`;
+    const exists = await prisma.masterSpec.findUnique({ where: { sku } });
+    if (!exists) return sku;
+  }
+  return `${prefix}${Date.now() % 1000}`;
+}
+
+// ── GET /api/protected/master-specs ─────────────────────────────────────────
 router.get('/', async (req, res) => {
-  const { search, active, productType, categoryId, isCustom,
+  const { search, active, categoryId, isCustom,
           page = '1', limit = '50' } = req.query as Record<string, string>;
 
   const pageNum  = Math.max(1, parseInt(page));
@@ -27,9 +37,6 @@ router.get('/', async (req, res) => {
   const where: Record<string, unknown> = {
     isActive: active === 'false' ? false : true,
   };
-  if (productType && VALID_PRODUCT_TYPES.includes(productType as ProductType)) {
-    where.productType = productType as ProductType;
-  }
   if (categoryId)   where.categoryId = parseInt(categoryId);
   if (isCustom !== undefined) where.isCustom = isCustom === 'true';
   if (search) {
@@ -41,30 +48,30 @@ router.get('/', async (req, res) => {
   }
 
   const [data, total] = await Promise.all([
-    prisma.product.findMany({
+    prisma.masterSpec.findMany({
       where,
-      orderBy: [{ productType: 'asc' }, { name: 'asc' }],
+      orderBy: [{ name: 'asc' }],
       skip: (pageNum - 1) * limitNum,
       take: limitNum,
       include: {
-        category: { select: { id: true, name: true } },
-        _count:   { select: { variants: true, bomLines: true } },
+        category: { select: { id: true, name: true, module: { select: { id: true, moduleKey: true, moduleName: true } } } },
+        _count:   { select: { variants: true, bomLines: true, customerItems: true } },
       },
     }),
-    prisma.product.count({ where }),
+    prisma.masterSpec.count({ where }),
   ]);
   res.json({ data, total, page: pageNum, limit: limitNum });
 });
 
-// ── GET /api/protected/products/:id ──────────────────────────────────────────
+// ── GET /api/protected/master-specs/:id ─────────────────────────────────────
 router.get('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
-  const product = await prisma.product.findUnique({
+  const masterSpec = await prisma.masterSpec.findUnique({
     where: { id },
     include: {
-      category:  { select: { id: true, name: true } },
+      category:  { select: { id: true, name: true, module: { select: { id: true, moduleKey: true, moduleName: true } } } },
       boxSpec:   true,
       blankSpec: {
         include: {
@@ -93,106 +100,115 @@ router.get('/:id', async (req, res) => {
         },
         orderBy: { location: { name: 'asc' } },
       },
+      customerItems: {
+        where: { isActive: true },
+        include: {
+          customer: { select: { id: true, code: true, name: true } },
+        },
+        orderBy: { customer: { name: 'asc' } },
+      },
     },
   });
-  if (!product) { res.status(404).json({ error: 'Product not found' }); return; }
-  res.json(product);
+  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
+  res.json(masterSpec);
 });
 
-// ── POST /api/protected/products ──────────────────────────────────────────────
+// ── POST /api/protected/master-specs ────────────────────────────────────────
 router.post('/', async (req, res) => {
-  const { sku, name, description, productType, categoryId, isCustom, listPrice } =
+  const { sku, name, description, categoryId, isCustom, listPrice } =
     req.body as Record<string, unknown>;
 
-  if (!String(sku   ?? '').trim()) { res.status(400).json({ error: 'sku is required' });         return; }
-  if (!String(name  ?? '').trim()) { res.status(400).json({ error: 'name is required' });        return; }
-  if (!productType || !VALID_PRODUCT_TYPES.includes(productType as ProductType)) {
-    res.status(400).json({ error: `productType must be one of: ${VALID_PRODUCT_TYPES.join(', ')}` }); return;
-  }
+  if (!String(name  ?? '').trim()) { res.status(400).json({ error: 'name is required' }); return; }
+
+  const finalSku = sku && String(sku).trim()
+    ? String(sku).trim().toUpperCase()
+    : await generateSku(String(name));
 
   try {
-    const product = await prisma.product.create({
+    const masterSpec = await prisma.masterSpec.create({
       data: {
-        sku:         String(sku).trim().toUpperCase(),
+        sku:         finalSku,
         name:        String(name).trim(),
         description: description != null ? String(description).trim() : null,
-        productType: productType as ProductType,
         categoryId:  categoryId  != null ? Number(categoryId) : null,
         isCustom:    isCustom    != null ? Boolean(isCustom)  : false,
         listPrice:   listPrice   != null ? (listPrice as string | number) : null,
       },
-      include: { category: { select: { id: true, name: true } } },
+      include: { category: { select: { id: true, name: true, module: { select: { id: true, moduleKey: true, moduleName: true } } } } },
     });
-    res.status(201).json(product);
+    res.status(201).json(masterSpec);
   } catch (err: any) {
-    if (err.code === 'P2002') { res.status(409).json({ error: 'A product with that SKU already exists' }); return; }
+    if (err.code === 'P2002') { res.status(409).json({ error: 'A master spec with that SKU already exists' }); return; }
     if (err.code === 'P2003') { res.status(400).json({ error: 'Category not found' }); return; }
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ── PUT /api/protected/products/:id ──────────────────────────────────────────
+// ── PUT /api/protected/master-specs/:id ─────────────────────────────────────
 router.put('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
-  const { sku, name, description, productType, categoryId, isCustom, listPrice, isActive } =
+  const { sku, name, description, categoryId, isCustom, listPrice, isActive } =
     req.body as Record<string, unknown>;
-
-  if (productType !== undefined && !VALID_PRODUCT_TYPES.includes(productType as ProductType)) {
-    res.status(400).json({ error: `productType must be one of: ${VALID_PRODUCT_TYPES.join(', ')}` }); return;
-  }
 
   const d: Record<string, unknown> = {};
   if (sku         !== undefined) d.sku         = String(sku).trim().toUpperCase();
   if (name        !== undefined) d.name        = String(name).trim();
   if (description !== undefined) d.description = description != null ? String(description).trim() : null;
-  if (productType !== undefined) d.productType = productType as ProductType;
   if (categoryId  !== undefined) d.categoryId  = categoryId  != null ? Number(categoryId)  : null;
   if (isCustom    !== undefined) d.isCustom    = Boolean(isCustom);
   if (listPrice   !== undefined) d.listPrice   = listPrice   != null ? (listPrice as string | number) : null;
   if (isActive    !== undefined) d.isActive    = Boolean(isActive);
 
   try {
-    const product = await prisma.product.update({
+    const masterSpec = await prisma.masterSpec.update({
       where: { id },
       data:  d as any,
-      include: { category: { select: { id: true, name: true } } },
+      include: { category: { select: { id: true, name: true, module: { select: { id: true, moduleKey: true, moduleName: true } } } } },
     });
-    res.json(product);
+    res.json(masterSpec);
   } catch (err: any) {
-    if (err.code === 'P2025') { res.status(404).json({ error: 'Product not found' }); return; }
+    if (err.code === 'P2025') { res.status(404).json({ error: 'Master spec not found' }); return; }
     if (err.code === 'P2002') { res.status(409).json({ error: 'SKU already in use' }); return; }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ── DELETE /api/protected/products/:id (soft delete) ─────────────────────────
+// ── DELETE /api/protected/master-specs/:id (soft delete) ────────────────────
 router.delete('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+
   try {
-    await prisma.product.update({ where: { id }, data: { isActive: false } });
+    // Safety check: active customer items referencing this spec
+    const ciCount = await prisma.customerItem.count({ where: { masterSpecId: id, isActive: true } });
+    if (ciCount > 0) {
+      res.status(409).json({ error: `Cannot deactivate: ${ciCount} active customer item(s) reference this spec`, count: ciCount });
+      return;
+    }
+
+    await prisma.masterSpec.update({ where: { id }, data: { isActive: false } });
     res.status(204).send();
   } catch (err: any) {
-    if (err.code === 'P2025') { res.status(404).json({ error: 'Product not found' }); return; }
+    if (err.code === 'P2025') { res.status(404).json({ error: 'Master spec not found' }); return; }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// VARIANTS  /api/protected/products/:id/variants
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
+// VARIANTS  /api/protected/master-specs/:id/variants
+// =============================================================================
 
 router.get('/:id/variants', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const { active } = req.query as Record<string, string>;
   const variants = await prisma.productVariant.findMany({
     where: {
-      productId,
+      masterSpecId,
       ...(active === 'false' ? {} : { isActive: true }),
     },
     orderBy: { sku: 'asc' },
@@ -201,22 +217,22 @@ router.get('/:id/variants', async (req, res) => {
 });
 
 router.post('/:id/variants', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const { sku, variantDescription, width, length, thickness,
           bundleQty, caseQty, listPrice } = req.body as Record<string, unknown>;
 
   if (!String(sku ?? '').trim()) { res.status(400).json({ error: 'sku is required' }); return; }
 
-  // Verify parent product exists
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
-  if (!product) { res.status(404).json({ error: 'Product not found' }); return; }
+  // Verify parent master spec exists
+  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
+  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
 
   try {
     const variant = await prisma.productVariant.create({
       data: {
-        productId,
+        masterSpecId,
         sku:               String(sku).trim().toUpperCase(),
         variantDescription: variantDescription != null ? String(variantDescription).trim() : null,
         width:             width     != null ? (width     as string | number) : null,
@@ -235,9 +251,9 @@ router.post('/:id/variants', async (req, res) => {
 });
 
 router.put('/:id/variants/:vid', async (req, res) => {
-  const productId = parseInt(req.params.id);
+  const masterSpecId = parseInt(req.params.id);
   const variantId = parseInt(req.params.vid);
-  if (isNaN(productId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { sku, variantDescription, width, length, thickness,
           bundleQty, caseQty, listPrice, isActive } = req.body as Record<string, unknown>;
@@ -255,7 +271,7 @@ router.put('/:id/variants/:vid', async (req, res) => {
 
   try {
     const variant = await prisma.productVariant.update({
-      where: { id: variantId, productId },
+      where: { id: variantId, masterSpecId },
       data:  d as any,
     });
     res.json(variant);
@@ -267,12 +283,12 @@ router.put('/:id/variants/:vid', async (req, res) => {
 });
 
 router.delete('/:id/variants/:vid', async (req, res) => {
-  const productId = parseInt(req.params.id);
+  const masterSpecId = parseInt(req.params.id);
   const variantId = parseInt(req.params.vid);
-  if (isNaN(productId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
   try {
     await prisma.productVariant.update({
-      where: { id: variantId, productId },
+      where: { id: variantId, masterSpecId },
       data:  { isActive: false },
     });
     res.status(204).send();
@@ -282,35 +298,35 @@ router.delete('/:id/variants/:vid', async (req, res) => {
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// SPECS  /api/protected/products/:id/specs
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
+// SPECS  /api/protected/master-specs/:id/specs
+// =============================================================================
 
 router.get('/:id/specs', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
   const specs = await prisma.productSpec.findMany({
-    where: { productId },
+    where: { masterSpecId },
     orderBy: [{ sortOrder: 'asc' }, { specKey: 'asc' }],
   });
   res.json(specs);
 });
 
 router.post('/:id/specs', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const { variantId, specKey, specValue, specUnit, sortOrder } = req.body as Record<string, unknown>;
   if (!String(specKey   ?? '').trim()) { res.status(400).json({ error: 'specKey is required' });   return; }
   if (!String(specValue ?? '').trim()) { res.status(400).json({ error: 'specValue is required' }); return; }
 
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
-  if (!product) { res.status(404).json({ error: 'Product not found' }); return; }
+  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
+  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
 
   try {
     const spec = await prisma.productSpec.create({
       data: {
-        productId,
+        masterSpecId,
         variantId: variantId != null ? Number(variantId) : null,
         specKey:   String(specKey).trim(),
         specValue: String(specValue).trim(),
@@ -326,9 +342,9 @@ router.post('/:id/specs', async (req, res) => {
 });
 
 router.put('/:id/specs/:sid', async (req, res) => {
-  const productId = parseInt(req.params.id);
+  const masterSpecId = parseInt(req.params.id);
   const specId    = parseInt(req.params.sid);
-  if (isNaN(productId) || isNaN(specId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(masterSpecId) || isNaN(specId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { specKey, specValue, specUnit, sortOrder } = req.body as Record<string, unknown>;
   const d: Record<string, unknown> = {};
@@ -338,7 +354,7 @@ router.put('/:id/specs/:sid', async (req, res) => {
   if (sortOrder !== undefined) d.sortOrder = sortOrder != null ? Number(sortOrder)       : null;
 
   try {
-    const spec = await prisma.productSpec.update({ where: { id: specId, productId }, data: d as any });
+    const spec = await prisma.productSpec.update({ where: { id: specId, masterSpecId }, data: d as any });
     res.json(spec);
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Spec not found' }); return; }
@@ -347,11 +363,11 @@ router.put('/:id/specs/:sid', async (req, res) => {
 });
 
 router.delete('/:id/specs/:sid', async (req, res) => {
-  const productId = parseInt(req.params.id);
+  const masterSpecId = parseInt(req.params.id);
   const specId    = parseInt(req.params.sid);
-  if (isNaN(productId) || isNaN(specId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(masterSpecId) || isNaN(specId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
   try {
-    await prisma.productSpec.delete({ where: { id: specId, productId } });
+    await prisma.productSpec.delete({ where: { id: specId, masterSpecId } });
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Spec not found' }); return; }
@@ -359,15 +375,15 @@ router.delete('/:id/specs/:sid', async (req, res) => {
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// BOM LINES  /api/protected/products/:id/bom
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
+// BOM LINES  /api/protected/master-specs/:id/bom
+// =============================================================================
 
 router.get('/:id/bom', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
   const lines = await prisma.bOMLine.findMany({
-    where: { productId },
+    where: { masterSpecId },
     include: {
       material: {
         select: { id: true, code: true, name: true, unitOfMeasure: true },
@@ -379,21 +395,21 @@ router.get('/:id/bom', async (req, res) => {
 });
 
 router.post('/:id/bom', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const { materialId, quantityPer, unitOfMeasure } = req.body as Record<string, unknown>;
   if (!materialId)                      { res.status(400).json({ error: 'materialId is required' });    return; }
   if (quantityPer == null)              { res.status(400).json({ error: 'quantityPer is required' });   return; }
   if (!String(unitOfMeasure ?? '').trim()) { res.status(400).json({ error: 'unitOfMeasure is required' }); return; }
 
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true } });
-  if (!product) { res.status(404).json({ error: 'Product not found' }); return; }
+  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
+  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
 
   try {
     const line = await prisma.bOMLine.create({
       data: {
-        productId,
+        masterSpecId,
         materialId:   Number(materialId),
         quantityPer:  quantityPer as string | number,
         unitOfMeasure: String(unitOfMeasure).trim(),
@@ -409,9 +425,9 @@ router.post('/:id/bom', async (req, res) => {
 });
 
 router.put('/:id/bom/:bid', async (req, res) => {
-  const productId = parseInt(req.params.id);
+  const masterSpecId = parseInt(req.params.id);
   const bomId     = parseInt(req.params.bid);
-  if (isNaN(productId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(masterSpecId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { quantityPer, unitOfMeasure } = req.body as Record<string, unknown>;
   const d: Record<string, unknown> = {};
@@ -420,7 +436,7 @@ router.put('/:id/bom/:bid', async (req, res) => {
 
   try {
     const line = await prisma.bOMLine.update({
-      where: { id: bomId, productId },
+      where: { id: bomId, masterSpecId },
       data:  d as any,
       include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
     });
@@ -432,11 +448,11 @@ router.put('/:id/bom/:bid', async (req, res) => {
 });
 
 router.delete('/:id/bom/:bid', async (req, res) => {
-  const productId = parseInt(req.params.id);
+  const masterSpecId = parseInt(req.params.id);
   const bomId     = parseInt(req.params.bid);
-  if (isNaN(productId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(masterSpecId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
   try {
-    await prisma.bOMLine.delete({ where: { id: bomId, productId } });
+    await prisma.bOMLine.delete({ where: { id: bomId, masterSpecId } });
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'BOM line not found' }); return; }
@@ -444,22 +460,22 @@ router.delete('/:id/bom/:bid', async (req, res) => {
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// BOX SPEC  /api/protected/products/:id/box-spec
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
+// BOX SPEC  /api/protected/master-specs/:id/box-spec
+// =============================================================================
 
 router.get('/:id/box-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
-  const spec = await prisma.boxSpec.findUnique({ where: { productId } });
-  if (!spec) { res.status(404).json({ error: 'No box spec for this product' }); return; }
+  const spec = await prisma.boxSpec.findUnique({ where: { masterSpecId } });
+  if (!spec) { res.status(404).json({ error: 'No box spec for this master spec' }); return; }
   res.json(spec);
 });
 
 router.post('/:id/box-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const { lengthInches, widthInches, heightInches, outsideDimensions,
           style, hasDieCut, hasPerforations, notes } = req.body as Record<string, unknown>;
@@ -472,16 +488,13 @@ router.post('/:id/box-spec', async (req, res) => {
     res.status(400).json({ error: `style must be one of: ${VALID_BOX_STYLES.join(', ')}` }); return;
   }
 
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, productType: true } });
-  if (!product) { res.status(404).json({ error: 'Product not found' }); return; }
-  if (product.productType !== 'CORRUGATED_BOX') {
-    res.status(400).json({ error: 'Box specs only apply to CORRUGATED_BOX products' }); return;
-  }
+  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
+  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
 
   try {
     const spec = await prisma.boxSpec.create({
       data: {
-        productId,
+        masterSpecId,
         lengthInches:      lengthInches as string | number,
         widthInches:       widthInches  as string | number,
         heightInches:      heightInches as string | number,
@@ -500,10 +513,10 @@ router.post('/:id/box-spec', async (req, res) => {
 });
 
 router.put('/:id/box-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
-  if (!await prisma.boxSpec.findUnique({ where: { productId } })) {
+  if (!await prisma.boxSpec.findUnique({ where: { masterSpecId } })) {
     res.status(404).json({ error: 'No box spec found — use POST to create one' }); return;
   }
 
@@ -525,7 +538,7 @@ router.put('/:id/box-spec', async (req, res) => {
   if (notes             !== undefined) d.notes             = notes != null ? String(notes).trim() : null;
 
   try {
-    const spec = await prisma.boxSpec.update({ where: { productId }, data: d as any });
+    const spec = await prisma.boxSpec.update({ where: { masterSpecId }, data: d as any });
     res.json(spec);
   } catch (err: any) {
     res.status(500).json({ error: 'Internal server error' });
@@ -533,10 +546,10 @@ router.put('/:id/box-spec', async (req, res) => {
 });
 
 router.delete('/:id/box-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
   try {
-    await prisma.boxSpec.delete({ where: { productId } });
+    await prisma.boxSpec.delete({ where: { masterSpecId } });
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Box spec not found' }); return; }
@@ -544,9 +557,9 @@ router.delete('/:id/box-spec', async (req, res) => {
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// BLANK SPEC  /api/protected/products/:id/blank-spec
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
+// BLANK SPEC  /api/protected/master-specs/:id/blank-spec
+// =============================================================================
 
 function validateBlankSpecBody(body: Record<string, unknown>, isCreate: boolean): string | null {
   if (isCreate) {
@@ -576,7 +589,6 @@ function buildBlankSpecData(body: Record<string, unknown>): Record<string, unkno
   const num  = (v: unknown) => v != null ? (v as string | number) : null;
   const str  = (v: unknown) => v != null ? String(v).trim() : null;
   const int  = (v: unknown) => v != null ? Number(v) : null;
-  const bool = (v: unknown) => Boolean(v);
 
   if (body.materialId         !== undefined) d.materialId         = Number(body.materialId);
   if (body.outsPerSheet       !== undefined) d.outsPerSheet       = Number(body.outsPerSheet);
@@ -622,31 +634,28 @@ const BLANK_SPEC_INCLUDE = {
 };
 
 router.get('/:id/blank-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
-  const spec = await prisma.blankSpec.findUnique({ where: { productId }, include: BLANK_SPEC_INCLUDE });
-  if (!spec) { res.status(404).json({ error: 'No blank spec for this product' }); return; }
+  const spec = await prisma.blankSpec.findUnique({ where: { masterSpecId }, include: BLANK_SPEC_INCLUDE });
+  if (!spec) { res.status(404).json({ error: 'No blank spec for this master spec' }); return; }
   res.json(spec);
 });
 
 router.post('/:id/blank-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const body = req.body as Record<string, unknown>;
   const err  = validateBlankSpecBody(body, true);
   if (err) { res.status(400).json({ error: err }); return; }
 
-  const product = await prisma.product.findUnique({ where: { id: productId }, select: { id: true, productType: true } });
-  if (!product) { res.status(404).json({ error: 'Product not found' }); return; }
-  if (product.productType !== 'CORRUGATED_BOX') {
-    res.status(400).json({ error: 'Blank specs only apply to CORRUGATED_BOX products' }); return;
-  }
+  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
+  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
 
   const data = buildBlankSpecData(body);
   // Required defaults for create
-  data.productId      = productId;
+  data.masterSpecId   = masterSpecId;
   if (!data.grainDirection) data.grainDirection = 'LONG_GRAIN';
   if (!data.flute)          data.flute          = 'C';
   if (!data.wallType)       data.wallType       = 'SINGLE';
@@ -665,10 +674,10 @@ router.post('/:id/blank-spec', async (req, res) => {
 });
 
 router.put('/:id/blank-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
-  if (!await prisma.blankSpec.findUnique({ where: { productId } })) {
+  if (!await prisma.blankSpec.findUnique({ where: { masterSpecId } })) {
     res.status(404).json({ error: 'No blank spec found — use POST to create one' }); return;
   }
 
@@ -679,7 +688,7 @@ router.put('/:id/blank-spec', async (req, res) => {
   const data = buildBlankSpecData(body);
 
   try {
-    const spec = await prisma.blankSpec.update({ where: { productId }, data: data as any, include: BLANK_SPEC_INCLUDE });
+    const spec = await prisma.blankSpec.update({ where: { masterSpecId }, data: data as any, include: BLANK_SPEC_INCLUDE });
     res.json(spec);
   } catch (e: any) {
     if (e.code === 'P2003') { res.status(400).json({ error: 'Referenced material, die, or variant not found' }); return; }
@@ -688,10 +697,10 @@ router.put('/:id/blank-spec', async (req, res) => {
 });
 
 router.delete('/:id/blank-spec', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
   try {
-    await prisma.blankSpec.delete({ where: { productId } });
+    await prisma.blankSpec.delete({ where: { masterSpecId } });
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Blank spec not found' }); return; }
@@ -699,16 +708,16 @@ router.delete('/:id/blank-spec', async (req, res) => {
   }
 });
 
-// ═════════════════════════════════════════════════════════════════════════════
-// FINISHED GOODS INVENTORY  /api/protected/products/:id/inventory
-// ═════════════════════════════════════════════════════════════════════════════
+// =============================================================================
+// FINISHED GOODS INVENTORY  /api/protected/master-specs/:id/inventory
+// =============================================================================
 
 router.get('/:id/inventory', async (req, res) => {
-  const productId = parseInt(req.params.id);
-  if (isNaN(productId)) { res.status(400).json({ error: 'Invalid product ID' }); return; }
+  const masterSpecId = parseInt(req.params.id);
+  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const rows = await prisma.finishedGoodsInventory.findMany({
-    where: { productId },
+    where: { masterSpecId },
     include: {
       location: { select: { id: true, name: true } },
       variant:  { select: { id: true, sku: true, variantDescription: true } },

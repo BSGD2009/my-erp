@@ -44,20 +44,20 @@ router.get('/materials', async (req, res) => {
 // ── GET /api/protected/inventory/finished-goods ───────────────────────────────
 // Finished goods inventory across all locations.
 router.get('/finished-goods', async (req, res) => {
-  const { productId, locationId } = req.query as Record<string, string>;
+  const { masterSpecId, locationId } = req.query as Record<string, string>;
 
   const where: Record<string, unknown> = {};
-  if (productId) where.productId = parseInt(productId);
+  if (masterSpecId) where.masterSpecId = parseInt(masterSpecId);
   if (locationId) where.locationId = parseInt(locationId);
 
   const rows = await prisma.finishedGoodsInventory.findMany({
     where,
     include: {
-      product:  { select: { id: true, sku: true, name: true, productType: true } },
-      variant:  { select: { id: true, sku: true, variantDescription: true } },
-      location: { select: { id: true, name: true } },
+      masterSpec: { select: { id: true, sku: true, name: true } },
+      variant:    { select: { id: true, sku: true, variantDescription: true } },
+      location:   { select: { id: true, name: true } },
     },
-    orderBy: [{ product: { name: 'asc' } }, { location: { name: 'asc' } }],
+    orderBy: [{ masterSpec: { name: 'asc' } }, { location: { name: 'asc' } }],
   });
 
   const totalQty = rows.reduce((sum, r) => sum + Number(r.quantity), 0);
@@ -66,7 +66,7 @@ router.get('/finished-goods', async (req, res) => {
 
 // ── GET /api/protected/inventory/transfers ────────────────────────────────────
 router.get('/transfers', async (req, res) => {
-  const { status, materialId, productId, fromLocationId, toLocationId,
+  const { status, materialId, masterSpecId, fromLocationId, toLocationId,
           page = '1', limit = '50' } = req.query as Record<string, string>;
 
   const pageNum  = Math.max(1, parseInt(page));
@@ -76,7 +76,7 @@ router.get('/transfers', async (req, res) => {
   if (status && Object.values(TransferStatus).includes(status as TransferStatus))
     where.status = status as TransferStatus;
   if (materialId)     where.materialId     = parseInt(materialId);
-  if (productId)      where.productId      = parseInt(productId);
+  if (masterSpecId)   where.masterSpecId   = parseInt(masterSpecId);
   if (fromLocationId) where.fromLocationId = parseInt(fromLocationId);
   if (toLocationId)   where.toLocationId   = parseInt(toLocationId);
 
@@ -88,7 +88,7 @@ router.get('/transfers', async (req, res) => {
       take: limitNum,
       include: {
         material:        { select: { id: true, code: true, name: true } },
-        product:         { select: { id: true, sku: true, name: true } },
+        masterSpec:      { select: { id: true, sku: true, name: true } },
         materialVariant: { select: { id: true, variantCode: true, description: true } },
         fromLocation:    { select: { id: true, name: true } },
         toLocation:      { select: { id: true, name: true } },
@@ -104,7 +104,7 @@ router.get('/transfers', async (req, res) => {
 // Creates a transfer record and (when status = COMPLETED) adjusts inventory.
 router.post('/transfers', async (req, res) => {
   const {
-    materialId, productId, variantId,
+    materialId, masterSpecId, variantId,
     fromLocationId, toLocationId,
     quantity, notes, status,
   } = req.body as Record<string, unknown>;
@@ -112,8 +112,8 @@ router.post('/transfers', async (req, res) => {
   if (!fromLocationId) { res.status(400).json({ error: 'fromLocationId is required' }); return; }
   if (!toLocationId)   { res.status(400).json({ error: 'toLocationId is required' });   return; }
   if (quantity == null) { res.status(400).json({ error: 'quantity is required' });       return; }
-  if (!materialId && !productId) {
-    res.status(400).json({ error: 'Either materialId or productId is required' }); return;
+  if (!materialId && !masterSpecId) {
+    res.status(400).json({ error: 'Either materialId or masterSpecId is required' }); return;
   }
   if (Number(fromLocationId) === Number(toLocationId)) {
     res.status(400).json({ error: 'fromLocationId and toLocationId must be different' }); return;
@@ -129,9 +129,9 @@ router.post('/transfers', async (req, res) => {
     const transfer = await prisma.$transaction(async (tx) => {
       const t = await tx.inventoryTransfer.create({
         data: {
-          materialId:      materialId != null ? Number(materialId) : null,
-          productId:       productId  != null ? Number(productId)  : null,
-          variantId:       variantId  != null ? Number(variantId)  : null,
+          materialId:      materialId   != null ? Number(materialId)   : null,
+          masterSpecId:    masterSpecId != null ? Number(masterSpecId) : null,
+          variantId:       variantId    != null ? Number(variantId)    : null,
           fromLocationId:  Number(fromLocationId),
           toLocationId:    Number(toLocationId),
           quantity:        quantity as string | number,
@@ -142,7 +142,7 @@ router.post('/transfers', async (req, res) => {
         },
         include: {
           material:      { select: { id: true, code: true, name: true } },
-          product:       { select: { id: true, sku: true, name: true } },
+          masterSpec:    { select: { id: true, sku: true, name: true } },
           fromLocation:  { select: { id: true, name: true } },
           toLocation:    { select: { id: true, name: true } },
           transferredBy: { select: { id: true, name: true } },
@@ -195,7 +195,7 @@ router.put('/transfers/:id', async (req, res) => {
         } as any,
         include: {
           material:      { select: { id: true, code: true, name: true } },
-          product:       { select: { id: true, sku: true, name: true } },
+          masterSpec:    { select: { id: true, sku: true, name: true } },
           fromLocation:  { select: { id: true, name: true } },
           toLocation:    { select: { id: true, name: true } },
           transferredBy: { select: { id: true, name: true } },
@@ -269,9 +269,9 @@ async function applyTransfer(tx: any, transfer: any) {
       });
     }
 
-  } else if (transfer.productId) {
+  } else if (transfer.masterSpecId) {
     // ── Finished goods transfer ──
-    const where = { productId: transfer.productId, variantId: transfer.variantId ?? null, locationId: transfer.fromLocationId };
+    const where = { masterSpecId: transfer.masterSpecId, variantId: transfer.variantId ?? null, locationId: transfer.fromLocationId };
     const fromRows = await tx.finishedGoodsInventory.findMany({ where });
     const fromRow  = fromRows[0];
 
@@ -289,7 +289,7 @@ async function applyTransfer(tx: any, transfer: any) {
 
     // Add to destination
     const toRows = await tx.finishedGoodsInventory.findMany({
-      where: { productId: transfer.productId, variantId: transfer.variantId ?? null, locationId: transfer.toLocationId },
+      where: { masterSpecId: transfer.masterSpecId, variantId: transfer.variantId ?? null, locationId: transfer.toLocationId },
     });
     const toRow = toRows[0];
 
@@ -305,7 +305,7 @@ async function applyTransfer(tx: any, transfer: any) {
     } else {
       await tx.finishedGoodsInventory.create({
         data: {
-          productId:  transfer.productId,
+          masterSpecId: transfer.masterSpecId,
           variantId:  transfer.variantId ?? null,
           locationId: transfer.toLocationId,
           quantity:   qty,

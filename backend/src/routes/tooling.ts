@@ -56,10 +56,11 @@ router.get('/:id', async (req, res) => {
     include: {
       customer:   { select: { id: true, code: true, name: true } },
       location:   { select: { id: true, name: true } },
-      // Which products reference this die
+      customerItem: { select: { id: true, code: true, name: true } },
+      masterSpec:   { select: { id: true, sku: true, name: true } },
       blankSpecs: {
-        include: { product: { select: { id: true, sku: true, name: true } } },
-        where:    { productId: { not: null } },
+        include: { masterSpec: { select: { id: true, sku: true, name: true } } },
+        where:    { masterSpecId: { not: null } },
       },
     },
   });
@@ -69,7 +70,8 @@ router.get('/:id', async (req, res) => {
 
 // ── POST /api/protected/tooling ───────────────────────────────────────────────
 router.post('/', async (req, res) => {
-  const { toolNumber, type, description, customerId, condition, locationId } =
+  const { toolNumber, type, description, customerId, condition, locationId,
+          customerItemId, masterSpecId, fileUrl, fileName } =
     req.body as Record<string, unknown>;
 
   if (!String(toolNumber ?? '').trim()) { res.status(400).json({ error: 'toolNumber is required' }); return; }
@@ -87,9 +89,13 @@ router.post('/', async (req, res) => {
         toolNumber:  String(toolNumber).trim().toUpperCase(),
         type:        type as ToolType,
         description: description != null ? String(description).trim() : null,
-        customerId:  customerId  != null ? Number(customerId)  : null,
-        condition:   condition as ToolCondition,
-        locationId:  Number(locationId),
+        customerId:    customerId    != null ? Number(customerId)    : null,
+        condition:     condition as ToolCondition,
+        locationId:    Number(locationId),
+        customerItemId: customerItemId != null ? Number(customerItemId) : null,
+        masterSpecId:   masterSpecId   != null ? Number(masterSpecId)   : null,
+        fileUrl:        fileUrl  != null ? String(fileUrl).trim()  : null,
+        fileName:       fileName != null ? String(fileName).trim() : null,
       },
       include: {
         customer: { select: { id: true, code: true, name: true } },
@@ -110,7 +116,8 @@ router.put('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
-  const { toolNumber, type, description, customerId, condition, locationId, isActive } =
+  const { toolNumber, type, description, customerId, condition, locationId, isActive,
+          customerItemId, masterSpecId, fileUrl, fileName } =
     req.body as Record<string, unknown>;
 
   if (type      !== undefined && !VALID_TYPES.includes(type as ToolType)) {
@@ -126,8 +133,12 @@ router.put('/:id', async (req, res) => {
   if (description  !== undefined) d.description  = description != null ? String(description).trim() : null;
   if (customerId   !== undefined) d.customerId   = customerId  != null ? Number(customerId)  : null;
   if (condition    !== undefined) d.condition    = condition as ToolCondition;
-  if (locationId   !== undefined) d.locationId   = Number(locationId);
-  if (isActive     !== undefined) d.isActive     = Boolean(isActive);
+  if (locationId     !== undefined) d.locationId     = Number(locationId);
+  if (isActive       !== undefined) d.isActive       = Boolean(isActive);
+  if (customerItemId !== undefined) d.customerItemId = customerItemId != null ? Number(customerItemId) : null;
+  if (masterSpecId   !== undefined) d.masterSpecId   = masterSpecId   != null ? Number(masterSpecId)   : null;
+  if (fileUrl        !== undefined) d.fileUrl        = fileUrl  != null ? String(fileUrl).trim()  : null;
+  if (fileName       !== undefined) d.fileName       = fileName != null ? String(fileName).trim() : null;
 
   try {
     const tool = await prisma.tooling.update({

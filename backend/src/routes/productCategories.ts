@@ -6,14 +6,18 @@ const router = Router();
 // ── GET /api/protected/product-categories ────────────────────────────────────
 // Returns flat list. Use ?tree=true for nested hierarchy.
 router.get('/', async (req, res) => {
-  const { active, tree } = req.query as { active?: string; tree?: string };
+  const { active, tree, moduleId } = req.query as { active?: string; tree?: string; moduleId?: string };
 
-  const where = { isActive: active === 'false' ? false : true };
+  const where: Record<string, unknown> = { isActive: active === 'false' ? false : true };
+  if (moduleId) where.moduleId = parseInt(moduleId);
 
   const categories = await prisma.productCategory.findMany({
     where,
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    include: { _count: { select: { products: true, children: true } } },
+    include: {
+      module: { select: { id: true, moduleKey: true, moduleName: true } },
+      _count: { select: { masterSpecs: true, children: true } },
+    },
   });
 
   if (tree === 'true') {
@@ -47,8 +51,9 @@ router.get('/:id', async (req, res) => {
     where: { id },
     include: {
       parent:   { select: { id: true, name: true } },
+      module:   { select: { id: true, moduleKey: true, moduleName: true } },
       children: { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }] },
-      _count:   { select: { products: true } },
+      _count:   { select: { masterSpecs: true } },
     },
   });
   if (!category) { res.status(404).json({ error: 'Category not found' }); return; }
@@ -57,17 +62,18 @@ router.get('/:id', async (req, res) => {
 
 // ── POST /api/protected/product-categories ────────────────────────────────────
 router.post('/', async (req, res) => {
-  const { name, parentId, description, sortOrder } = req.body as {
-    name?: string; parentId?: number | null; description?: string; sortOrder?: number;
+  const { name, parentId, moduleId, description, sortOrder } = req.body as {
+    name?: string; parentId?: number | null; moduleId?: number | null;
+    description?: string; sortOrder?: number;
   };
   if (!name?.trim()) { res.status(400).json({ error: 'name is required' }); return; }
 
-  // Prevent self-reference (caught by DB, but give a useful message)
   try {
     const category = await prisma.productCategory.create({
       data: {
         name:        name.trim(),
         parentId:    parentId ?? null,
+        moduleId:    moduleId ?? null,
         description: description?.trim() || null,
         sortOrder:   sortOrder ?? null,
       },
@@ -85,9 +91,9 @@ router.put('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
-  const { name, parentId, description, sortOrder, isActive } = req.body as {
-    name?: string; parentId?: number | null; description?: string;
-    sortOrder?: number | null; isActive?: boolean;
+  const { name, parentId, moduleId, description, sortOrder, isActive } = req.body as {
+    name?: string; parentId?: number | null; moduleId?: number | null;
+    description?: string; sortOrder?: number | null; isActive?: boolean;
   };
 
   // Guard: cannot set a category as its own parent
@@ -101,6 +107,7 @@ router.put('/:id', async (req, res) => {
       data: {
         ...(name        !== undefined && { name:        name.trim() }),
         ...(parentId    !== undefined && { parentId:    parentId ?? null }),
+        ...(moduleId    !== undefined && { moduleId:    moduleId ?? null }),
         ...(description !== undefined && { description: description?.trim() || null }),
         ...(sortOrder   !== undefined && { sortOrder:   sortOrder ?? null }),
         ...(isActive    !== undefined && { isActive }),

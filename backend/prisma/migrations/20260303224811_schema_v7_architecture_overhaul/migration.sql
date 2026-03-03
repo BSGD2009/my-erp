@@ -2,13 +2,13 @@
 CREATE TYPE "Role" AS ENUM ('ADMIN', 'CSR');
 
 -- CreateEnum
+CREATE TYPE "PartyRoleType" AS ENUM ('CUSTOMER', 'SUPPLIER', 'CARRIER', 'PROSPECT', 'OTHER');
+
+-- CreateEnum
 CREATE TYPE "ContactType" AS ENUM ('MAIN', 'BUYER', 'SALES_REP', 'PURCHASING', 'AP', 'RECEIVING', 'SHIPPING', 'OTHER');
 
 -- CreateEnum
 CREATE TYPE "LocationType" AS ENUM ('OWN_PLANT', 'OWN_WAREHOUSE', 'OFFICE', 'CUSTOMER', 'SUPPLIER', 'OTHER');
-
--- CreateEnum
-CREATE TYPE "ProductType" AS ENUM ('CORRUGATED_BOX', 'PACKAGING_SUPPLY', 'RESALE', 'LABOR_SERVICE', 'OTHER');
 
 -- CreateEnum
 CREATE TYPE "BoxStyle" AS ENUM ('RSC', 'HSC', 'FOL', 'TELESCOPE', 'DIE_CUT', 'BLISS', 'TRAY', 'OTHER');
@@ -30,6 +30,12 @@ CREATE TYPE "GrainDirection" AS ENUM ('LONG_GRAIN', 'SHORT_GRAIN');
 
 -- CreateEnum
 CREATE TYPE "JointType" AS ENUM ('GLUED', 'STAPLED', 'TAPED', 'NONE');
+
+-- CreateEnum
+CREATE TYPE "FulfillmentPath" AS ENUM ('MANUFACTURE', 'FULFILL_FROM_STOCK', 'PURCHASE_RESELL', 'DROP_SHIP', 'CONVERT', 'SERVICE');
+
+-- CreateEnum
+CREATE TYPE "CommitmentStatus" AS ENUM ('PENDING', 'COMMITTED', 'RELEASED', 'CANCELLED');
 
 -- CreateEnum
 CREATE TYPE "QuoteStatus" AS ENUM ('DRAFT', 'SENT', 'ACCEPTED', 'DECLINED', 'EXPIRED');
@@ -99,14 +105,80 @@ CREATE TABLE "MaterialType" (
 );
 
 -- CreateTable
-CREATE TABLE "WorkCenterType" (
+CREATE TABLE "ResourceType" (
     "id" SERIAL NOT NULL,
     "typeKey" TEXT NOT NULL,
     "typeName" TEXT NOT NULL,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
 
-    CONSTRAINT "WorkCenterType_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "ResourceType_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductModule" (
+    "id" SERIAL NOT NULL,
+    "moduleKey" TEXT NOT NULL,
+    "moduleName" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "ProductModule_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ModuleSpecField" (
+    "id" SERIAL NOT NULL,
+    "moduleId" INTEGER NOT NULL,
+    "fieldKey" TEXT NOT NULL,
+    "fieldLabel" TEXT NOT NULL,
+    "fieldType" TEXT NOT NULL,
+    "selectOptions" TEXT,
+    "isRequired" BOOLEAN NOT NULL DEFAULT false,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+
+    CONSTRAINT "ModuleSpecField_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Party" (
+    "id" SERIAL NOT NULL,
+    "partyCode" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Party_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PartyRole" (
+    "id" SERIAL NOT NULL,
+    "partyId" INTEGER NOT NULL,
+    "roleType" "PartyRoleType" NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PartyRole_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PartyContact" (
+    "id" SERIAL NOT NULL,
+    "partyId" INTEGER NOT NULL,
+    "name" TEXT,
+    "title" TEXT,
+    "email" TEXT,
+    "phone" TEXT,
+    "contactType" "ContactType" NOT NULL,
+    "isPrimary" BOOLEAN NOT NULL DEFAULT false,
+    "invoiceDistribution" BOOLEAN NOT NULL DEFAULT false,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PartyContact_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -128,6 +200,7 @@ CREATE TABLE "Location" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
     "locationType" "LocationType" NOT NULL DEFAULT 'OWN_PLANT',
+    "partyId" INTEGER,
     "isRegistered" BOOLEAN NOT NULL DEFAULT false,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
     "street" TEXT,
@@ -137,6 +210,10 @@ CREATE TABLE "Location" (
     "country" TEXT DEFAULT 'US',
     "phone" TEXT,
     "email" TEXT,
+    "contactName" TEXT,
+    "contactPhone" TEXT,
+    "contactEmail" TEXT,
+    "deliveryInstructions" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -148,6 +225,7 @@ CREATE TABLE "Customer" (
     "id" SERIAL NOT NULL,
     "code" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "partyId" INTEGER,
     "accountNumber" TEXT,
     "taxId" TEXT,
     "resaleCertificateNumber" TEXT,
@@ -178,64 +256,11 @@ CREATE TABLE "Customer" (
 );
 
 -- CreateTable
-CREATE TABLE "CustomerContact" (
-    "id" SERIAL NOT NULL,
-    "customerId" INTEGER NOT NULL,
-    "name" TEXT NOT NULL,
-    "title" TEXT,
-    "email" TEXT,
-    "phone" TEXT,
-    "contactType" "ContactType" NOT NULL,
-    "isPrimary" BOOLEAN NOT NULL DEFAULT false,
-    "invoiceDistribution" BOOLEAN NOT NULL DEFAULT false,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "CustomerContact_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "ShipToAddress" (
-    "id" SERIAL NOT NULL,
-    "customerId" INTEGER NOT NULL,
-    "locationName" TEXT NOT NULL,
-    "street" TEXT,
-    "city" TEXT,
-    "state" TEXT,
-    "zip" TEXT,
-    "country" TEXT DEFAULT 'US',
-    "contactName" TEXT,
-    "contactPhone" TEXT,
-    "contactEmail" TEXT,
-    "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    "deliveryInstructions" TEXT,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "ShipToAddress_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "WorkCenter" (
-    "id" SERIAL NOT NULL,
-    "name" TEXT NOT NULL,
-    "workCenterTypeId" INTEGER,
-    "description" TEXT,
-    "locationId" INTEGER,
-    "equipmentId" INTEGER,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "WorkCenter_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "Supplier" (
     "id" SERIAL NOT NULL,
     "code" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "partyId" INTEGER,
     "accountNumber" TEXT,
     "taxId" TEXT,
     "is1099Eligible" BOOLEAN NOT NULL DEFAULT false,
@@ -256,29 +281,12 @@ CREATE TABLE "Supplier" (
 );
 
 -- CreateTable
-CREATE TABLE "SupplierContact" (
-    "id" SERIAL NOT NULL,
-    "supplierId" INTEGER NOT NULL,
-    "name" TEXT NOT NULL,
-    "title" TEXT,
-    "email" TEXT,
-    "phone" TEXT,
-    "contactType" "ContactType" NOT NULL,
-    "isPrimary" BOOLEAN NOT NULL DEFAULT false,
-    "invoiceDistribution" BOOLEAN NOT NULL DEFAULT false,
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "SupplierContact_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "Equipment" (
+CREATE TABLE "Resource" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
-    "equipmentTypeId" INTEGER NOT NULL,
+    "resourceTypeId" INTEGER NOT NULL,
     "locationId" INTEGER NOT NULL,
+    "description" TEXT,
     "manufacturer" TEXT,
     "modelNumber" TEXT,
     "serialNumber" TEXT,
@@ -300,7 +308,7 @@ CREATE TABLE "Equipment" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Equipment_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "Resource_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -308,7 +316,6 @@ CREATE TABLE "Operation" (
     "id" SERIAL NOT NULL,
     "operationKey" TEXT NOT NULL,
     "operationName" TEXT NOT NULL,
-    "defaultEquipmentTypeId" INTEGER,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
 
@@ -316,14 +323,25 @@ CREATE TABLE "Operation" (
 );
 
 -- CreateTable
-CREATE TABLE "EquipmentCapability" (
+CREATE TABLE "ResourceCapability" (
     "id" SERIAL NOT NULL,
-    "equipmentId" INTEGER NOT NULL,
+    "resourceId" INTEGER NOT NULL,
     "operationId" INTEGER NOT NULL,
     "maxSpeed" DECIMAL(10,2),
     "notes" TEXT,
 
-    CONSTRAINT "EquipmentCapability_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "ResourceCapability_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "OperationRequirement" (
+    "id" SERIAL NOT NULL,
+    "operationId" INTEGER NOT NULL,
+    "resourceTypeId" INTEGER NOT NULL,
+    "isRequired" BOOLEAN NOT NULL DEFAULT true,
+    "notes" TEXT,
+
+    CONSTRAINT "OperationRequirement_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -439,6 +457,7 @@ CREATE TABLE "ProductCategory" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
     "parentId" INTEGER,
+    "moduleId" INTEGER,
     "description" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "sortOrder" INTEGER,
@@ -449,12 +468,11 @@ CREATE TABLE "ProductCategory" (
 );
 
 -- CreateTable
-CREATE TABLE "Product" (
+CREATE TABLE "MasterSpec" (
     "id" SERIAL NOT NULL,
     "sku" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
-    "productType" "ProductType" NOT NULL,
     "categoryId" INTEGER,
     "isCustom" BOOLEAN NOT NULL DEFAULT false,
     "listPrice" DECIMAL(12,4),
@@ -462,13 +480,31 @@ CREATE TABLE "Product" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "Product_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "MasterSpec_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CustomerItem" (
+    "id" SERIAL NOT NULL,
+    "code" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "customerId" INTEGER NOT NULL,
+    "masterSpecId" INTEGER,
+    "variantId" INTEGER,
+    "listPrice" DECIMAL(12,4),
+    "fulfillmentPath" "FulfillmentPath" NOT NULL DEFAULT 'MANUFACTURE',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "CustomerItem_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "BoxSpec" (
     "id" SERIAL NOT NULL,
-    "productId" INTEGER,
+    "masterSpecId" INTEGER,
     "quoteItemId" INTEGER,
     "lengthInches" DECIMAL(8,3) NOT NULL,
     "widthInches" DECIMAL(8,3) NOT NULL,
@@ -485,7 +521,7 @@ CREATE TABLE "BoxSpec" (
 -- CreateTable
 CREATE TABLE "BlankSpec" (
     "id" SERIAL NOT NULL,
-    "productId" INTEGER,
+    "masterSpecId" INTEGER,
     "quoteItemId" INTEGER,
     "materialId" INTEGER NOT NULL,
     "outsPerSheet" INTEGER NOT NULL DEFAULT 1,
@@ -529,7 +565,7 @@ CREATE TABLE "BlankSpec" (
 -- CreateTable
 CREATE TABLE "BOMLine" (
     "id" SERIAL NOT NULL,
-    "productId" INTEGER NOT NULL,
+    "masterSpecId" INTEGER NOT NULL,
     "materialId" INTEGER NOT NULL,
     "quantityPer" DECIMAL(14,6) NOT NULL,
     "unitOfMeasure" TEXT NOT NULL,
@@ -544,8 +580,12 @@ CREATE TABLE "Tooling" (
     "type" "ToolType" NOT NULL,
     "description" TEXT,
     "customerId" INTEGER,
+    "customerItemId" INTEGER,
+    "masterSpecId" INTEGER,
     "condition" "ToolCondition" NOT NULL,
     "locationId" INTEGER NOT NULL,
+    "fileUrl" TEXT,
+    "fileName" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -556,7 +596,7 @@ CREATE TABLE "Tooling" (
 -- CreateTable
 CREATE TABLE "ProductVariant" (
     "id" SERIAL NOT NULL,
-    "productId" INTEGER NOT NULL,
+    "masterSpecId" INTEGER NOT NULL,
     "sku" TEXT NOT NULL,
     "variantDescription" TEXT,
     "width" DECIMAL(8,3),
@@ -573,9 +613,20 @@ CREATE TABLE "ProductVariant" (
 );
 
 -- CreateTable
+CREATE TABLE "VariantSpec" (
+    "id" SERIAL NOT NULL,
+    "variantId" INTEGER NOT NULL,
+    "specFieldId" INTEGER NOT NULL,
+    "value" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "VariantSpec_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ProductSpec" (
     "id" SERIAL NOT NULL,
-    "productId" INTEGER NOT NULL,
+    "masterSpecId" INTEGER NOT NULL,
     "variantId" INTEGER,
     "specKey" TEXT NOT NULL,
     "specValue" TEXT NOT NULL,
@@ -588,7 +639,7 @@ CREATE TABLE "ProductSpec" (
 -- CreateTable
 CREATE TABLE "FinishedGoodsInventory" (
     "id" SERIAL NOT NULL,
-    "productId" INTEGER NOT NULL,
+    "masterSpecId" INTEGER NOT NULL,
     "variantId" INTEGER,
     "locationId" INTEGER NOT NULL,
     "quantity" DECIMAL(14,4) NOT NULL DEFAULT 0,
@@ -602,7 +653,7 @@ CREATE TABLE "FinishedGoodsInventory" (
 CREATE TABLE "InventoryTransfer" (
     "id" SERIAL NOT NULL,
     "materialId" INTEGER,
-    "productId" INTEGER,
+    "masterSpecId" INTEGER,
     "variantId" INTEGER,
     "fromLocationId" INTEGER NOT NULL,
     "toLocationId" INTEGER NOT NULL,
@@ -634,7 +685,7 @@ CREATE TABLE "Quote" (
 CREATE TABLE "QuoteItem" (
     "id" SERIAL NOT NULL,
     "quoteId" INTEGER NOT NULL,
-    "productId" INTEGER,
+    "customerItemId" INTEGER,
     "variantId" INTEGER,
     "lineNumber" INTEGER NOT NULL,
     "description" TEXT NOT NULL,
@@ -683,7 +734,7 @@ CREATE TABLE "SalesOrderItem" (
     "id" SERIAL NOT NULL,
     "orderId" INTEGER NOT NULL,
     "quoteItemId" INTEGER,
-    "productId" INTEGER,
+    "customerItemId" INTEGER,
     "variantId" INTEGER,
     "lineNumber" INTEGER NOT NULL,
     "description" TEXT NOT NULL,
@@ -697,11 +748,27 @@ CREATE TABLE "SalesOrderItem" (
 );
 
 -- CreateTable
+CREATE TABLE "InventoryCommitment" (
+    "id" SERIAL NOT NULL,
+    "orderItemId" INTEGER NOT NULL,
+    "masterSpecId" INTEGER,
+    "variantId" INTEGER,
+    "locationId" INTEGER NOT NULL,
+    "quantity" DECIMAL(14,4) NOT NULL,
+    "status" "CommitmentStatus" NOT NULL DEFAULT 'PENDING',
+    "committedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "releasedAt" TIMESTAMP(3),
+    "notes" TEXT,
+
+    CONSTRAINT "InventoryCommitment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "ProductionJob" (
     "id" SERIAL NOT NULL,
     "jobNumber" TEXT NOT NULL,
     "orderItemId" INTEGER NOT NULL,
-    "workCenterId" INTEGER NOT NULL,
+    "resourceId" INTEGER NOT NULL,
     "locationId" INTEGER NOT NULL,
     "sequence" INTEGER NOT NULL,
     "status" "JobStatus" NOT NULL DEFAULT 'QUEUED',
@@ -817,7 +884,25 @@ CREATE UNIQUE INDEX "PaymentTerm_termCode_key" ON "PaymentTerm"("termCode");
 CREATE UNIQUE INDEX "MaterialType_typeKey_key" ON "MaterialType"("typeKey");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "WorkCenterType_typeKey_key" ON "WorkCenterType"("typeKey");
+CREATE UNIQUE INDEX "ResourceType_typeKey_key" ON "ResourceType"("typeKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ProductModule_moduleKey_key" ON "ProductModule"("moduleKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ModuleSpecField_moduleId_fieldKey_key" ON "ModuleSpecField"("moduleId", "fieldKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Party_partyCode_key" ON "Party"("partyCode");
+
+-- CreateIndex
+CREATE INDEX "PartyRole_partyId_idx" ON "PartyRole"("partyId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PartyRole_partyId_roleType_key" ON "PartyRole"("partyId", "roleType");
+
+-- CreateIndex
+CREATE INDEX "PartyContact_partyId_idx" ON "PartyContact"("partyId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
@@ -826,7 +911,13 @@ CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 CREATE UNIQUE INDEX "Location_name_key" ON "Location"("name");
 
 -- CreateIndex
+CREATE INDEX "Location_partyId_idx" ON "Location"("partyId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Customer_code_key" ON "Customer"("code");
+
+-- CreateIndex
+CREATE INDEX "Customer_partyId_idx" ON "Customer"("partyId");
 
 -- CreateIndex
 CREATE INDEX "Customer_defaultSalesRepId_idx" ON "Customer"("defaultSalesRepId");
@@ -835,40 +926,31 @@ CREATE INDEX "Customer_defaultSalesRepId_idx" ON "Customer"("defaultSalesRepId")
 CREATE INDEX "Customer_paymentTermId_idx" ON "Customer"("paymentTermId");
 
 -- CreateIndex
-CREATE INDEX "CustomerContact_customerId_idx" ON "CustomerContact"("customerId");
-
--- CreateIndex
-CREATE INDEX "ShipToAddress_customerId_idx" ON "ShipToAddress"("customerId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "WorkCenter_name_key" ON "WorkCenter"("name");
-
--- CreateIndex
-CREATE INDEX "WorkCenter_workCenterTypeId_idx" ON "WorkCenter"("workCenterTypeId");
-
--- CreateIndex
-CREATE INDEX "WorkCenter_locationId_idx" ON "WorkCenter"("locationId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "Supplier_code_key" ON "Supplier"("code");
 
 -- CreateIndex
-CREATE INDEX "SupplierContact_supplierId_idx" ON "SupplierContact"("supplierId");
+CREATE INDEX "Supplier_partyId_idx" ON "Supplier"("partyId");
 
 -- CreateIndex
-CREATE INDEX "Equipment_equipmentTypeId_idx" ON "Equipment"("equipmentTypeId");
+CREATE UNIQUE INDEX "Resource_name_key" ON "Resource"("name");
 
 -- CreateIndex
-CREATE INDEX "Equipment_locationId_idx" ON "Equipment"("locationId");
+CREATE INDEX "Resource_resourceTypeId_idx" ON "Resource"("resourceTypeId");
 
 -- CreateIndex
-CREATE INDEX "Equipment_partsSupplierId_idx" ON "Equipment"("partsSupplierId");
+CREATE INDEX "Resource_locationId_idx" ON "Resource"("locationId");
+
+-- CreateIndex
+CREATE INDEX "Resource_partsSupplierId_idx" ON "Resource"("partsSupplierId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Operation_operationKey_key" ON "Operation"("operationKey");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EquipmentCapability_equipmentId_operationId_key" ON "EquipmentCapability"("equipmentId", "operationId");
+CREATE UNIQUE INDEX "ResourceCapability_resourceId_operationId_key" ON "ResourceCapability"("resourceId", "operationId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "OperationRequirement_operationId_resourceTypeId_key" ON "OperationRequirement"("operationId", "resourceTypeId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Material_code_key" ON "Material"("code");
@@ -919,28 +1001,37 @@ CREATE UNIQUE INDEX "PurchaseOrderItem_poId_lineNumber_key" ON "PurchaseOrderIte
 CREATE INDEX "ProductCategory_parentId_idx" ON "ProductCategory"("parentId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Product_sku_key" ON "Product"("sku");
+CREATE INDEX "ProductCategory_moduleId_idx" ON "ProductCategory"("moduleId");
 
 -- CreateIndex
-CREATE INDEX "Product_productType_idx" ON "Product"("productType");
+CREATE UNIQUE INDEX "MasterSpec_sku_key" ON "MasterSpec"("sku");
 
 -- CreateIndex
-CREATE INDEX "Product_categoryId_idx" ON "Product"("categoryId");
+CREATE INDEX "MasterSpec_categoryId_idx" ON "MasterSpec"("categoryId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BoxSpec_productId_key" ON "BoxSpec"("productId");
+CREATE UNIQUE INDEX "CustomerItem_code_key" ON "CustomerItem"("code");
+
+-- CreateIndex
+CREATE INDEX "CustomerItem_customerId_idx" ON "CustomerItem"("customerId");
+
+-- CreateIndex
+CREATE INDEX "CustomerItem_masterSpecId_idx" ON "CustomerItem"("masterSpecId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BoxSpec_masterSpecId_key" ON "BoxSpec"("masterSpecId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "BoxSpec_quoteItemId_key" ON "BoxSpec"("quoteItemId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BlankSpec_productId_key" ON "BlankSpec"("productId");
+CREATE UNIQUE INDEX "BlankSpec_masterSpecId_key" ON "BlankSpec"("masterSpecId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "BlankSpec_quoteItemId_key" ON "BlankSpec"("quoteItemId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "BOMLine_productId_materialId_key" ON "BOMLine"("productId", "materialId");
+CREATE UNIQUE INDEX "BOMLine_masterSpecId_materialId_key" ON "BOMLine"("masterSpecId", "materialId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Tooling_toolNumber_key" ON "Tooling"("toolNumber");
@@ -949,19 +1040,28 @@ CREATE UNIQUE INDEX "Tooling_toolNumber_key" ON "Tooling"("toolNumber");
 CREATE INDEX "Tooling_customerId_idx" ON "Tooling"("customerId");
 
 -- CreateIndex
+CREATE INDEX "Tooling_customerItemId_idx" ON "Tooling"("customerItemId");
+
+-- CreateIndex
+CREATE INDEX "Tooling_masterSpecId_idx" ON "Tooling"("masterSpecId");
+
+-- CreateIndex
 CREATE INDEX "Tooling_type_idx" ON "Tooling"("type");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ProductVariant_sku_key" ON "ProductVariant"("sku");
 
 -- CreateIndex
-CREATE INDEX "ProductVariant_productId_idx" ON "ProductVariant"("productId");
+CREATE INDEX "ProductVariant_masterSpecId_idx" ON "ProductVariant"("masterSpecId");
 
 -- CreateIndex
-CREATE INDEX "ProductSpec_productId_idx" ON "ProductSpec"("productId");
+CREATE UNIQUE INDEX "VariantSpec_variantId_specFieldId_key" ON "VariantSpec"("variantId", "specFieldId");
 
 -- CreateIndex
-CREATE INDEX "FinishedGoodsInventory_productId_idx" ON "FinishedGoodsInventory"("productId");
+CREATE INDEX "ProductSpec_masterSpecId_idx" ON "ProductSpec"("masterSpecId");
+
+-- CreateIndex
+CREATE INDEX "FinishedGoodsInventory_masterSpecId_idx" ON "FinishedGoodsInventory"("masterSpecId");
 
 -- CreateIndex
 CREATE INDEX "FinishedGoodsInventory_locationId_idx" ON "FinishedGoodsInventory"("locationId");
@@ -970,7 +1070,7 @@ CREATE INDEX "FinishedGoodsInventory_locationId_idx" ON "FinishedGoodsInventory"
 CREATE INDEX "InventoryTransfer_materialId_idx" ON "InventoryTransfer"("materialId");
 
 -- CreateIndex
-CREATE INDEX "InventoryTransfer_productId_idx" ON "InventoryTransfer"("productId");
+CREATE INDEX "InventoryTransfer_masterSpecId_idx" ON "InventoryTransfer"("masterSpecId");
 
 -- CreateIndex
 CREATE INDEX "InventoryTransfer_fromLocationId_idx" ON "InventoryTransfer"("fromLocationId");
@@ -1015,13 +1115,22 @@ CREATE INDEX "SalesOrderItem_orderId_idx" ON "SalesOrderItem"("orderId");
 CREATE UNIQUE INDEX "SalesOrderItem_orderId_lineNumber_key" ON "SalesOrderItem"("orderId", "lineNumber");
 
 -- CreateIndex
+CREATE INDEX "InventoryCommitment_orderItemId_idx" ON "InventoryCommitment"("orderItemId");
+
+-- CreateIndex
+CREATE INDEX "InventoryCommitment_masterSpecId_idx" ON "InventoryCommitment"("masterSpecId");
+
+-- CreateIndex
+CREATE INDEX "InventoryCommitment_locationId_idx" ON "InventoryCommitment"("locationId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ProductionJob_jobNumber_key" ON "ProductionJob"("jobNumber");
 
 -- CreateIndex
 CREATE INDEX "ProductionJob_status_idx" ON "ProductionJob"("status");
 
 -- CreateIndex
-CREATE INDEX "ProductionJob_workCenterId_idx" ON "ProductionJob"("workCenterId");
+CREATE INDEX "ProductionJob_resourceId_idx" ON "ProductionJob"("resourceId");
 
 -- CreateIndex
 CREATE INDEX "ProductionJob_scheduledDate_idx" ON "ProductionJob"("scheduledDate");
@@ -1060,49 +1169,52 @@ CREATE INDEX "Invoice_status_idx" ON "Invoice"("status");
 CREATE INDEX "Invoice_qbSyncStatus_idx" ON "Invoice"("qbSyncStatus");
 
 -- AddForeignKey
+ALTER TABLE "ModuleSpecField" ADD CONSTRAINT "ModuleSpecField_moduleId_fkey" FOREIGN KEY ("moduleId") REFERENCES "ProductModule"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PartyRole" ADD CONSTRAINT "PartyRole_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PartyContact" ADD CONSTRAINT "PartyContact_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Location" ADD CONSTRAINT "Location_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Customer" ADD CONSTRAINT "Customer_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_paymentTermId_fkey" FOREIGN KEY ("paymentTermId") REFERENCES "PaymentTerm"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_defaultSalesRepId_fkey" FOREIGN KEY ("defaultSalesRepId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "CustomerContact" ADD CONSTRAINT "CustomerContact_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ShipToAddress" ADD CONSTRAINT "ShipToAddress_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "WorkCenter" ADD CONSTRAINT "WorkCenter_workCenterTypeId_fkey" FOREIGN KEY ("workCenterTypeId") REFERENCES "WorkCenterType"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "WorkCenter" ADD CONSTRAINT "WorkCenter_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "WorkCenter" ADD CONSTRAINT "WorkCenter_equipmentId_fkey" FOREIGN KEY ("equipmentId") REFERENCES "Equipment"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "Supplier" ADD CONSTRAINT "Supplier_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Supplier" ADD CONSTRAINT "Supplier_paymentTermId_fkey" FOREIGN KEY ("paymentTermId") REFERENCES "PaymentTerm"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SupplierContact" ADD CONSTRAINT "SupplierContact_supplierId_fkey" FOREIGN KEY ("supplierId") REFERENCES "Supplier"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Resource" ADD CONSTRAINT "Resource_resourceTypeId_fkey" FOREIGN KEY ("resourceTypeId") REFERENCES "ResourceType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Equipment" ADD CONSTRAINT "Equipment_equipmentTypeId_fkey" FOREIGN KEY ("equipmentTypeId") REFERENCES "WorkCenterType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Resource" ADD CONSTRAINT "Resource_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Equipment" ADD CONSTRAINT "Equipment_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Resource" ADD CONSTRAINT "Resource_partsSupplierId_fkey" FOREIGN KEY ("partsSupplierId") REFERENCES "Supplier"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Equipment" ADD CONSTRAINT "Equipment_partsSupplierId_fkey" FOREIGN KEY ("partsSupplierId") REFERENCES "Supplier"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ResourceCapability" ADD CONSTRAINT "ResourceCapability_resourceId_fkey" FOREIGN KEY ("resourceId") REFERENCES "Resource"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Operation" ADD CONSTRAINT "Operation_defaultEquipmentTypeId_fkey" FOREIGN KEY ("defaultEquipmentTypeId") REFERENCES "WorkCenterType"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ResourceCapability" ADD CONSTRAINT "ResourceCapability_operationId_fkey" FOREIGN KEY ("operationId") REFERENCES "Operation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "EquipmentCapability" ADD CONSTRAINT "EquipmentCapability_equipmentId_fkey" FOREIGN KEY ("equipmentId") REFERENCES "Equipment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "OperationRequirement" ADD CONSTRAINT "OperationRequirement_operationId_fkey" FOREIGN KEY ("operationId") REFERENCES "Operation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "EquipmentCapability" ADD CONSTRAINT "EquipmentCapability_operationId_fkey" FOREIGN KEY ("operationId") REFERENCES "Operation"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "OperationRequirement" ADD CONSTRAINT "OperationRequirement_resourceTypeId_fkey" FOREIGN KEY ("resourceTypeId") REFERENCES "ResourceType"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Material" ADD CONSTRAINT "Material_materialTypeId_fkey" FOREIGN KEY ("materialTypeId") REFERENCES "MaterialType"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1150,16 +1262,28 @@ ALTER TABLE "PurchaseOrderItem" ADD CONSTRAINT "PurchaseOrderItem_materialId_fke
 ALTER TABLE "ProductCategory" ADD CONSTRAINT "ProductCategory_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "ProductCategory"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Product" ADD CONSTRAINT "Product_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "ProductCategory"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ProductCategory" ADD CONSTRAINT "ProductCategory_moduleId_fkey" FOREIGN KEY ("moduleId") REFERENCES "ProductModule"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "BoxSpec" ADD CONSTRAINT "BoxSpec_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "MasterSpec" ADD CONSTRAINT "MasterSpec_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "ProductCategory"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerItem" ADD CONSTRAINT "CustomerItem_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerItem" ADD CONSTRAINT "CustomerItem_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CustomerItem" ADD CONSTRAINT "CustomerItem_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "BoxSpec" ADD CONSTRAINT "BoxSpec_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "BoxSpec" ADD CONSTRAINT "BoxSpec_quoteItemId_fkey" FOREIGN KEY ("quoteItemId") REFERENCES "QuoteItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "BlankSpec" ADD CONSTRAINT "BlankSpec_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "BlankSpec" ADD CONSTRAINT "BlankSpec_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "BlankSpec" ADD CONSTRAINT "BlankSpec_quoteItemId_fkey" FOREIGN KEY ("quoteItemId") REFERENCES "QuoteItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1174,7 +1298,7 @@ ALTER TABLE "BlankSpec" ADD CONSTRAINT "BlankSpec_requiredDieId_fkey" FOREIGN KE
 ALTER TABLE "BlankSpec" ADD CONSTRAINT "BlankSpec_materialVariantId_fkey" FOREIGN KEY ("materialVariantId") REFERENCES "MaterialVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "BOMLine" ADD CONSTRAINT "BOMLine_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "BOMLine" ADD CONSTRAINT "BOMLine_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "BOMLine" ADD CONSTRAINT "BOMLine_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "Material"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1183,19 +1307,31 @@ ALTER TABLE "BOMLine" ADD CONSTRAINT "BOMLine_materialId_fkey" FOREIGN KEY ("mat
 ALTER TABLE "Tooling" ADD CONSTRAINT "Tooling_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Tooling" ADD CONSTRAINT "Tooling_customerItemId_fkey" FOREIGN KEY ("customerItemId") REFERENCES "CustomerItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Tooling" ADD CONSTRAINT "Tooling_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Tooling" ADD CONSTRAINT "Tooling_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductVariant" ADD CONSTRAINT "ProductVariant_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ProductVariant" ADD CONSTRAINT "ProductVariant_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductSpec" ADD CONSTRAINT "ProductSpec_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "VariantSpec" ADD CONSTRAINT "VariantSpec_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "VariantSpec" ADD CONSTRAINT "VariantSpec_specFieldId_fkey" FOREIGN KEY ("specFieldId") REFERENCES "ModuleSpecField"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductSpec" ADD CONSTRAINT "ProductSpec_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductSpec" ADD CONSTRAINT "ProductSpec_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "FinishedGoodsInventory" ADD CONSTRAINT "FinishedGoodsInventory_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "FinishedGoodsInventory" ADD CONSTRAINT "FinishedGoodsInventory_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "FinishedGoodsInventory" ADD CONSTRAINT "FinishedGoodsInventory_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1207,7 +1343,7 @@ ALTER TABLE "FinishedGoodsInventory" ADD CONSTRAINT "FinishedGoodsInventory_loca
 ALTER TABLE "InventoryTransfer" ADD CONSTRAINT "InventoryTransfer_materialId_fkey" FOREIGN KEY ("materialId") REFERENCES "Material"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "InventoryTransfer" ADD CONSTRAINT "InventoryTransfer_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "InventoryTransfer" ADD CONSTRAINT "InventoryTransfer_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "InventoryTransfer" ADD CONSTRAINT "InventoryTransfer_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "MaterialVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1231,7 +1367,7 @@ ALTER TABLE "Quote" ADD CONSTRAINT "Quote_createdById_fkey" FOREIGN KEY ("create
 ALTER TABLE "QuoteItem" ADD CONSTRAINT "QuoteItem_quoteId_fkey" FOREIGN KEY ("quoteId") REFERENCES "Quote"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "QuoteItem" ADD CONSTRAINT "QuoteItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "QuoteItem" ADD CONSTRAINT "QuoteItem_customerItemId_fkey" FOREIGN KEY ("customerItemId") REFERENCES "CustomerItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "QuoteItem" ADD CONSTRAINT "QuoteItem_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -1258,16 +1394,28 @@ ALTER TABLE "SalesOrderItem" ADD CONSTRAINT "SalesOrderItem_orderId_fkey" FOREIG
 ALTER TABLE "SalesOrderItem" ADD CONSTRAINT "SalesOrderItem_quoteItemId_fkey" FOREIGN KEY ("quoteItemId") REFERENCES "QuoteItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "SalesOrderItem" ADD CONSTRAINT "SalesOrderItem_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "SalesOrderItem" ADD CONSTRAINT "SalesOrderItem_customerItemId_fkey" FOREIGN KEY ("customerItemId") REFERENCES "CustomerItem"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "SalesOrderItem" ADD CONSTRAINT "SalesOrderItem_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "InventoryCommitment" ADD CONSTRAINT "InventoryCommitment_orderItemId_fkey" FOREIGN KEY ("orderItemId") REFERENCES "SalesOrderItem"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryCommitment" ADD CONSTRAINT "InventoryCommitment_masterSpecId_fkey" FOREIGN KEY ("masterSpecId") REFERENCES "MasterSpec"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryCommitment" ADD CONSTRAINT "InventoryCommitment_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "ProductVariant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryCommitment" ADD CONSTRAINT "InventoryCommitment_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "ProductionJob" ADD CONSTRAINT "ProductionJob_orderItemId_fkey" FOREIGN KEY ("orderItemId") REFERENCES "SalesOrderItem"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProductionJob" ADD CONSTRAINT "ProductionJob_workCenterId_fkey" FOREIGN KEY ("workCenterId") REFERENCES "WorkCenter"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ProductionJob" ADD CONSTRAINT "ProductionJob_resourceId_fkey" FOREIGN KEY ("resourceId") REFERENCES "Resource"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductionJob" ADD CONSTRAINT "ProductionJob_locationId_fkey" FOREIGN KEY ("locationId") REFERENCES "Location"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1313,4 +1461,3 @@ ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_shipmentId_fkey" FOREIGN KEY ("shi
 
 -- AddForeignKey
 ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-

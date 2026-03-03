@@ -46,15 +46,16 @@ export function DashboardPage() {
 }
 
 const MODULES = [
-  { icon: '👥', label: 'Customers',    session: 'Session 3 ✓', path: '/customers' },
-  { icon: '🏭', label: 'Suppliers',    session: 'Session 3 ✓', path: '/suppliers' },
-  { icon: '📍', label: 'Locations',    session: 'Session 3 ✓', path: '/locations' },
-  { icon: '🔩', label: 'Materials',    session: 'Session 3 ✓', path: '/materials' },
-  { icon: '📦', label: 'Products',     session: 'Session 4 ✓', path: '/products' },
-  { icon: '🔧', label: 'Tooling',      session: 'Session 4 ✓', path: '/tooling' },
-  { icon: '📊', label: 'Inventory',    session: 'Session 4 ✓', path: '/inventory' },
-  { icon: '⚙️',  label: 'Equipment',   session: 'Session 4 ✓', path: '/equipment' },
-  { icon: '💬', label: 'Quotes',       session: 'Session 6',   path: null },
-  { icon: '📋', label: 'Sales Orders', session: 'Session 7',   path: null },
-  { icon: '🚛', label: 'Shipping',     session: 'Session 10',  path: null },
+  { icon: '👥', label: 'Customers',      session: 'Session 3 ✓', path: '/customers' },
+  { icon: '🏭', label: 'Suppliers',      session: 'Session 3 ✓', path: '/suppliers' },
+  { icon: '📍', label: 'Locations',      session: 'Session 3 ✓', path: '/locations' },
+  { icon: '🔩', label: 'Materials',      session: 'Session 3 ✓', path: '/materials' },
+  { icon: '📦', label: 'Master Specs',   session: 'Session 4 ✓', path: '/master-specs' },
+  { icon: '🏷️', label: 'Customer Items', session: 'Session 4 ✓', path: '/customer-items' },
+  { icon: '🔧', label: 'Tooling',        session: 'Session 4 ✓', path: '/tooling' },
+  { icon: '📊', label: 'Inventory',      session: 'Session 4 ✓', path: '/inventory' },
+  { icon: '⚙️', label: 'Resources',      session: 'Session 4 ✓', path: '/resources' },
+  { icon: '💬', label: 'Quotes',         session: 'Session 6',   path: null },
+  { icon: '📋', label: 'Sales Orders',   session: 'Session 7',   path: null },
+  { icon: '🚛', label: 'Shipping',       session: 'Session 10',  path: null },
 ];

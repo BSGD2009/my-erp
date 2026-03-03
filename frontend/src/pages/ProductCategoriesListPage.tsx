@@ -7,7 +7,8 @@ import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardSty
 interface Category {
   id: number; name: string; parentId?: number; description?: string;
   sortOrder?: number; isActive: boolean;
-  _count: { products: number; children: number };
+  module?: { id: number; moduleKey: string; moduleName: string };
+  _count: { masterSpecs: number; children: number };
 }
 
 const EMPTY = { name: '', parentId: '', description: '', sortOrder: '', isActive: true };
@@ -110,8 +111,8 @@ export function ProductCategoriesListPage() {
 
   async function deleteCategory(id: number, r: Category, e: React.MouseEvent) {
     e.stopPropagation();
-    if (r._count.products > 0) {
-      setError(`Cannot delete "${r.name}": it has ${r._count.products} product(s) assigned.`);
+    if (r._count.masterSpecs > 0) {
+      setError(`Cannot delete "${r.name}": it has ${r._count.masterSpecs} product(s) assigned.`);
       return;
     }
     if (!confirm(`Deactivate category "${r.name}"?`)) return;
@@ -143,7 +144,7 @@ export function ProductCategoriesListPage() {
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Parent</th>
               <Th col="sortOrder"        label="Sort Order"     sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <Th col="_count.children"  label="Sub-categories" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-              <Th col="_count.products"  label="Products"       sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+              <Th col="_count.masterSpecs" label="Master Specs" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Status</th>
               <th style={{ padding: '0.75rem 1rem', width: 40 }} />
             </tr>
@@ -163,7 +164,7 @@ export function ProductCategoriesListPage() {
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textMuted, textAlign: 'center' }}>{r.sortOrder ?? '--'}</td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.children > 0 ? r._count.children : '--'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.products > 0 ? r._count.products : '--'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>{r._count.masterSpecs > 0 ? r._count.masterSpecs : '--'}</td>
                 <td style={{ padding: '0.75rem 1rem' }}>
                   <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: r.isActive ? 'rgba(34,197,94,0.12)' : 'rgba(100,116,139,0.12)', color: r.isActive ? '#22c55e' : '#64748b' }}>
                     {r.isActive ? 'Active' : 'Inactive'}

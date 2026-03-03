@@ -39,7 +39,15 @@ router.get('/', async (req, res) => {
       take: limitNum,
       include: {
         paymentTerm: { select: { id: true, termName: true } },
-        _count: { select: { contacts: true, purchaseOrders: true } },
+        party: {
+          include: {
+            contacts: {
+              where: { isActive: true, isPrimary: true },
+              take: 1,
+            },
+          },
+        },
+        _count: { select: { purchaseOrders: true } },
       },
     }),
     prisma.supplier.count({ where: where as any }),
@@ -56,7 +64,14 @@ router.get('/:id', async (req, res) => {
     where: { id },
     include: {
       paymentTerm: { select: { id: true, termCode: true, termName: true, netDays: true } },
-      contacts: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }] },
+      party: {
+        include: {
+          contacts: {
+            where: { isActive: true },
+            orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }],
+          },
+        },
+      },
       _count: { select: { purchaseOrders: true } },
     },
   });
@@ -88,6 +103,7 @@ router.post('/', async (req, res) => {
         paymentTermId:  b.paymentTermId != null ? Number(b.paymentTermId)  : null,
         creditLimit:    b.creditLimit   != null ? (b.creditLimit as number) : null,
         w9OnFile:       b.w9OnFile != null ? Boolean(b.w9OnFile) : false,
+        partyId:        b.partyId       != null ? Number(b.partyId)        : null,
       },
     });
     res.status(201).json(supplier);
@@ -122,6 +138,7 @@ router.put('/:id', async (req, res) => {
     if (b.creditLimit    !== undefined) d.creditLimit    = b.creditLimit   != null ? (b.creditLimit as number) : null;
     if (b.w9OnFile       !== undefined) d.w9OnFile       = Boolean(b.w9OnFile);
     if (b.isActive       !== undefined) d.isActive       = Boolean(b.isActive);
+    if (b.partyId        !== undefined) d.partyId        = b.partyId       != null ? Number(b.partyId)        : null;
 
     const supplier = await prisma.supplier.update({ where: { id }, data: d as any });
     res.json(supplier);
@@ -152,62 +169,92 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// ─── SUPPLIER CONTACTS sub-resource ─────────────────────────────────────────
+// ─── CONTACTS sub-resource (via Party → PartyContact) ──────────────────────
+
+// Helper: look up supplier and return its partyId, or send error response
+async function getSupplierPartyId(req: any, res: any): Promise<number | null> {
+  const supplierId = parseInt(req.params.id);
+  if (isNaN(supplierId)) { res.status(400).json({ error: 'Invalid ID' }); return null; }
+
+  const supplier = await prisma.supplier.findUnique({
+    where: { id: supplierId },
+    select: { id: true, partyId: true },
+  });
+  if (!supplier) { res.status(404).json({ error: 'Supplier not found' }); return null; }
+  if (!supplier.partyId) { res.status(400).json({ error: 'Supplier has no linked party. Set partyId first.' }); return null; }
+  return supplier.partyId;
+}
 
 router.get('/:id/contacts', async (req, res) => {
   const supplierId = parseInt(req.params.id);
   if (isNaN(supplierId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
-  const contacts = await prisma.supplierContact.findMany({
-    where: { supplierId, isActive: true },
+
+  const supplier = await prisma.supplier.findUnique({
+    where: { id: supplierId },
+    select: { id: true, partyId: true },
+  });
+  if (!supplier) { res.status(404).json({ error: 'Supplier not found' }); return; }
+
+  // If no party linked yet, return empty array (not an error)
+  if (!supplier.partyId) { res.json([]); return; }
+
+  const contacts = await prisma.partyContact.findMany({
+    where: { partyId: supplier.partyId, isActive: true },
     orderBy: [{ isPrimary: 'desc' }, { name: 'asc' }],
   });
   res.json(contacts);
 });
 
 router.post('/:id/contacts', async (req, res) => {
-  const supplierId = parseInt(req.params.id);
-  if (isNaN(supplierId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await getSupplierPartyId(req, res);
+  if (partyId === null) return;
+
   const b = req.body as Record<string, unknown>;
-  if (!String(b.name ?? '').trim()) { res.status(400).json({ error: 'name is required' }); return; }
   if (!b.contactType || !CONTACT_TYPES.includes(b.contactType as ContactType)) {
     res.status(400).json({ error: `contactType must be one of: ${CONTACT_TYPES.join(', ')}` }); return;
   }
+
   try {
     if (b.isPrimary) {
-      await prisma.supplierContact.updateMany({ where: { supplierId, isPrimary: true }, data: { isPrimary: false } });
+      await prisma.partyContact.updateMany({ where: { partyId, isPrimary: true }, data: { isPrimary: false } });
     }
-    const contact = await prisma.supplierContact.create({
+    const contact = await prisma.partyContact.create({
       data: {
-        supplierId,
-        name: String(b.name).trim(),
-        title: b.title ? String(b.title).trim() : null,
-        email: b.email ? String(b.email).trim() : null,
-        phone: b.phone ? String(b.phone).trim() : null,
-        contactType: b.contactType as ContactType,
-        isPrimary: b.isPrimary != null ? Boolean(b.isPrimary) : false,
+        partyId,
+        name:                b.name  ? String(b.name).trim()  : null,
+        title:               b.title ? String(b.title).trim() : null,
+        email:               b.email ? String(b.email).trim() : null,
+        phone:               b.phone ? String(b.phone).trim() : null,
+        contactType:         b.contactType as ContactType,
+        isPrimary:           b.isPrimary != null ? Boolean(b.isPrimary) : false,
         invoiceDistribution: b.invoiceDistribution != null ? Boolean(b.invoiceDistribution) : false,
       },
     });
     res.status(201).json(contact);
   } catch (err: any) {
-    if (err.code === 'P2003') { res.status(404).json({ error: 'Supplier not found' }); return; }
+    if (err.code === 'P2003') { res.status(404).json({ error: 'Party not found' }); return; }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 router.put('/:id/contacts/:contactId', async (req, res) => {
-  const supplierId = parseInt(req.params.id);
-  const contactId  = parseInt(req.params.contactId);
-  if (isNaN(supplierId) || isNaN(contactId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await getSupplierPartyId(req, res);
+  if (partyId === null) return;
+
+  const contactId = parseInt(req.params.contactId);
+  if (isNaN(contactId)) { res.status(400).json({ error: 'Invalid contact ID' }); return; }
+
   const b = req.body as Record<string, unknown>;
   try {
-    const existing = await prisma.supplierContact.findFirst({ where: { id: contactId, supplierId } });
+    const existing = await prisma.partyContact.findFirst({ where: { id: contactId, partyId } });
     if (!existing) { res.status(404).json({ error: 'Contact not found' }); return; }
+
     if (b.isPrimary) {
-      await prisma.supplierContact.updateMany({ where: { supplierId, isPrimary: true, id: { not: contactId } }, data: { isPrimary: false } });
+      await prisma.partyContact.updateMany({ where: { partyId, isPrimary: true, id: { not: contactId } }, data: { isPrimary: false } });
     }
+
     const d: Record<string, unknown> = {};
-    if (b.name                !== undefined) d.name                = String(b.name).trim();
+    if (b.name                !== undefined) d.name                = b.name  ? String(b.name).trim()  : null;
     if (b.title               !== undefined) d.title               = b.title ? String(b.title).trim() : null;
     if (b.email               !== undefined) d.email               = b.email ? String(b.email).trim() : null;
     if (b.phone               !== undefined) d.phone               = b.phone ? String(b.phone).trim() : null;
@@ -215,7 +262,8 @@ router.put('/:id/contacts/:contactId', async (req, res) => {
     if (b.isPrimary           !== undefined) d.isPrimary           = Boolean(b.isPrimary);
     if (b.invoiceDistribution !== undefined) d.invoiceDistribution = Boolean(b.invoiceDistribution);
     if (b.isActive            !== undefined) d.isActive            = Boolean(b.isActive);
-    const contact = await prisma.supplierContact.update({ where: { id: contactId }, data: d as any });
+
+    const contact = await prisma.partyContact.update({ where: { id: contactId }, data: d as any });
     res.json(contact);
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Contact not found' }); return; }
@@ -224,11 +272,14 @@ router.put('/:id/contacts/:contactId', async (req, res) => {
 });
 
 router.delete('/:id/contacts/:contactId', async (req, res) => {
-  const supplierId = parseInt(req.params.id);
-  const contactId  = parseInt(req.params.contactId);
-  if (isNaN(supplierId) || isNaN(contactId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  const partyId = await getSupplierPartyId(req, res);
+  if (partyId === null) return;
+
+  const contactId = parseInt(req.params.contactId);
+  if (isNaN(contactId)) { res.status(400).json({ error: 'Invalid contact ID' }); return; }
+
   try {
-    const result = await prisma.supplierContact.updateMany({ where: { id: contactId, supplierId }, data: { isActive: false } });
+    const result = await prisma.partyContact.updateMany({ where: { id: contactId, partyId }, data: { isActive: false } });
     if (result.count === 0) { res.status(404).json({ error: 'Contact not found' }); return; }
     res.status(204).send();
   } catch {

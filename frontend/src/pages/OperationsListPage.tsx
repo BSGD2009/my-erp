@@ -7,15 +7,22 @@ import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle } from '
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
-interface EquipmentType { id: number; typeKey: string; typeName: string }
+interface ResourceType { id: number; typeKey: string; typeName: string }
+
+interface OperationRequirement {
+  id: number;
+  resourceType: { id: number; typeKey: string; typeName: string };
+  isRequired: boolean;
+  notes?: string;
+}
 
 interface Operation {
   id: number; operationKey: string; operationName: string;
-  defaultEquipmentTypeId?: number; sortOrder: number;
-  defaultEquipmentType?: { id: number; typeKey: string; typeName: string };
+  sortOrder: number; isActive: boolean;
+  operationRequirements: OperationRequirement[];
 }
 
-const EMPTY_FORM = { operationKey: '', operationName: '', defaultEquipmentTypeId: '', sortOrder: '0' };
+const EMPTY_FORM = { operationKey: '', operationName: '', sortOrder: '0' };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -52,10 +59,14 @@ export function OperationsListPage() {
   const [toast, setToast]           = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Lookups
-  const [equipmentTypes, setEquipmentTypes] = useState<EquipmentType[]>([]);
+  const [resourceTypes, setResourceTypes] = useState<ResourceType[]>([]);
+
+  // Requirement add
+  const [addingReqFor, setAddingReqFor] = useState<number | null>(null);
+  const [newReqTypeId, setNewReqTypeId] = useState('');
 
   useEffect(() => {
-    api.get<EquipmentType[]>('/protected/work-center-types').then(setEquipmentTypes).catch(() => {});
+    api.get<ResourceType[]>('/protected/resource-types').then(setResourceTypes).catch(() => {});
   }, []);
 
   const load = useCallback(async () => {
@@ -69,13 +80,11 @@ export function OperationsListPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Sort by sortOrder then operationKey
   const sorted = [...rows].sort((a, b) => {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
     return a.operationKey.localeCompare(b.operationKey);
   });
 
-  // ── Drawer helpers ──
   function openNew() {
     setEditId(null);
     setF(EMPTY_FORM);
@@ -89,7 +98,6 @@ export function OperationsListPage() {
     setF({
       operationKey: r.operationKey,
       operationName: r.operationName,
-      defaultEquipmentTypeId: r.defaultEquipmentTypeId != null ? String(r.defaultEquipmentTypeId) : '',
       sortOrder: String(r.sortOrder),
     });
     setDrawerOpen(true);
@@ -106,7 +114,6 @@ export function OperationsListPage() {
       const body: Record<string, unknown> = {
         operationKey: f.operationKey.trim().toUpperCase(),
         operationName: f.operationName.trim(),
-        defaultEquipmentTypeId: f.defaultEquipmentTypeId ? parseInt(f.defaultEquipmentTypeId) : null,
         sortOrder: f.sortOrder ? parseInt(f.sortOrder) : 0,
       };
       if (editId) {
@@ -125,16 +132,32 @@ export function OperationsListPage() {
   async function deleteOp() {
     if (!editId) return;
     const op = rows.find(r => r.id === editId);
-    if (!window.confirm(`Delete operation "${op?.operationName}"? This will fail if equipment capabilities reference it.`)) return;
+    if (!window.confirm(`Delete operation "${op?.operationName}"? This will fail if resource capabilities reference it.`)) return;
     try {
       await api.delete(`/protected/operations/${editId}`);
       setDrawerOpen(false);
       flash('Operation deleted.', 'success');
       load();
     } catch (e: any) {
-      // 409 means capabilities reference it
       setSaveErr(e.message);
     }
+  }
+
+  async function addRequirement(opId: number) {
+    if (!newReqTypeId) return;
+    try {
+      await api.post(`/protected/operations/${opId}/requirements`, { resourceTypeId: parseInt(newReqTypeId) });
+      setAddingReqFor(null);
+      setNewReqTypeId('');
+      load();
+    } catch (e: any) { setError(e.message); }
+  }
+
+  async function removeRequirement(opId: number, reqId: number) {
+    try {
+      await api.delete(`/protected/operations/${opId}/requirements/${reqId}`);
+      load();
+    } catch (e: any) { setError(e.message); }
   }
 
   function flash(text: string, type: 'success' | 'error') {
@@ -144,7 +167,6 @@ export function OperationsListPage() {
 
   return (
     <Layout>
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>Operations</h1>
@@ -163,12 +185,11 @@ export function OperationsListPage() {
         </div>
       )}
 
-      {/* Table */}
-      <div style={{ ...cardStyle, overflow: 'hidden', maxWidth: 860 }}>
+      <div style={{ ...cardStyle, overflow: 'hidden', maxWidth: 960 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
-              {['Operation Key', 'Operation Name', 'Default Equipment Type', 'Sort Order'].map(h => (
+              {['Operation Key', 'Operation Name', 'Resource Requirements', 'Sort Order'].map(h => (
                 <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -191,13 +212,39 @@ export function OperationsListPage() {
                 <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.accent, fontWeight: 600 }}>{r.operationKey}</td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: 500 }}>{r.operationName}</td>
                 <td style={{ padding: '0.75rem 1rem' }}>
-                  {r.defaultEquipmentType ? (
-                    <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: 4, background: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}>
-                      {r.defaultEquipmentType.typeName}
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: '0.82rem', color: c.textMuted }}>{'\u2014'}</span>
-                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                    {r.operationRequirements.map(req => (
+                      <span key={req.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 600, padding: '0.2rem 0.55rem', borderRadius: 4, background: 'rgba(59,130,246,0.1)', color: '#60a5fa' }}>
+                        {req.resourceType.typeName}
+                        <button
+                          onClick={e => { e.stopPropagation(); removeRequirement(r.id, req.id); }}
+                          style={{ background: 'none', border: 'none', color: 'rgba(239,68,68,0.7)', cursor: 'pointer', fontSize: '0.7rem', padding: 0, lineHeight: 1 }}
+                          title="Remove requirement"
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                    {addingReqFor === r.id ? (
+                      <span style={{ display: 'inline-flex', gap: 4 }} onClick={e => e.stopPropagation()}>
+                        <select style={{ ...inputStyle, padding: '0.15rem 0.4rem', fontSize: '0.75rem', maxWidth: 160 }} value={newReqTypeId} onChange={e => setNewReqTypeId(e.target.value)}>
+                          <option value="">-- Type --</option>
+                          {resourceTypes.filter(rt => !r.operationRequirements.some(req => req.resourceType.id === rt.id)).map(rt => (
+                            <option key={rt.id} value={rt.id}>{rt.typeName}</option>
+                          ))}
+                        </select>
+                        <button onClick={() => addRequirement(r.id)} style={{ ...btnPrimary, padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}>Add</button>
+                        <button onClick={() => { setAddingReqFor(null); setNewReqTypeId(''); }} style={{ ...btnSecondary, padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}>x</button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={e => { e.stopPropagation(); setAddingReqFor(r.id); setNewReqTypeId(''); }}
+                        style={{ background: 'none', border: `1px dashed ${c.divider}`, borderRadius: 4, padding: '0.15rem 0.45rem', fontSize: '0.7rem', color: c.textMuted, cursor: 'pointer' }}
+                      >
+                        + req
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.sortOrder}</td>
               </tr>
@@ -206,7 +253,6 @@ export function OperationsListPage() {
         </table>
       </div>
 
-      {/* Drawer */}
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={editId ? 'Edit Operation' : 'New Operation'}>
         {saveErr && (
           <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '0.65rem 1rem', marginBottom: '1rem', fontSize: '0.85rem', color: c.danger }}>
@@ -219,12 +265,6 @@ export function OperationsListPage() {
         </Field>
         <Field label="Operation Name *">
           <input style={inputStyle} value={f.operationName} onChange={set('operationName')} placeholder="Flexographic Printing" />
-        </Field>
-        <Field label="Default Equipment Type">
-          <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.defaultEquipmentTypeId} onChange={set('defaultEquipmentTypeId')}>
-            <option value="">-- None --</option>
-            {equipmentTypes.map(t => <option key={t.id} value={t.id}>{t.typeName}</option>)}
-          </select>
         </Field>
         <Field label="Sort Order">
           <input style={inputStyle} type="number" value={f.sortOrder} onChange={set('sortOrder')} />

@@ -1,8 +1,10 @@
-// BoxERP — Prisma Schema
-// Session 4 Review: 7 new tables (PaymentTerm, ShipToAddress, MaterialType,
-//   WorkCenterType, Equipment, Operation, EquipmentCapability, SupplierContact).
-//   Replaced MaterialType + WorkCenterType enums with admin-managed lookup tables.
-//   Split addresses, payment terms FK, equipment tracking, operations catalog.
+// BoxERP — Prisma Schema v7
+// Session 4 Review v2: Architecture Overhaul
+//   - Party model (Party, PartyRole, PartyContact) — unified contacts
+//   - Unified Location (partyId, replaces ShipToAddress)
+//   - Resource model (replaces WorkCenter + Equipment)
+//   - Product → MasterSpec rename; ProductModule + ModuleSpecField
+//   - CustomerItem, VariantSpec, InventoryCommitment
 
 generator client {
   provider      = "prisma-client-js"
@@ -23,6 +25,14 @@ enum Role {
   CSR
 }
 
+enum PartyRoleType {
+  CUSTOMER
+  SUPPLIER
+  CARRIER
+  PROSPECT
+  OTHER
+}
+
 enum ContactType {
   MAIN
   BUYER
@@ -40,14 +50,6 @@ enum LocationType {
   OFFICE
   CUSTOMER
   SUPPLIER
-  OTHER
-}
-
-enum ProductType {
-  CORRUGATED_BOX
-  PACKAGING_SUPPLY
-  RESALE
-  LABOR_SERVICE
   OTHER
 }
 
@@ -105,6 +107,22 @@ enum JointType {
   STAPLED
   TAPED
   NONE
+}
+
+enum FulfillmentPath {
+  MANUFACTURE
+  FULFILL_FROM_STOCK
+  PURCHASE_RESELL
+  DROP_SHIP
+  CONVERT
+  SERVICE
+}
+
+enum CommitmentStatus {
+  PENDING
+  COMMITTED
+  RELEASED
+  CANCELLED
 }
 
 enum QuoteStatus {
@@ -217,7 +235,7 @@ enum ToolCondition {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LOOKUP TABLES (admin-managed)
+// LOOKUP / ADMIN TABLES
 // ─────────────────────────────────────────────────────────────────────────────
 
 model PaymentTerm {
@@ -244,16 +262,93 @@ model MaterialType {
   materials Material[]
 }
 
-model WorkCenterType {
+model ResourceType {
   id        Int      @id @default(autoincrement())
   typeKey   String   @unique
   typeName  String
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
 
-  workCenters WorkCenter[]
-  equipment   Equipment[]
-  operations  Operation[]
+  resources             Resource[]
+  operationRequirements OperationRequirement[]
+}
+
+model ProductModule {
+  id         Int      @id @default(autoincrement())
+  moduleKey  String   @unique
+  moduleName String
+  isActive   Boolean  @default(true)
+  sortOrder  Int      @default(0)
+
+  specFields ModuleSpecField[]
+  categories ProductCategory[]
+}
+
+model ModuleSpecField {
+  id            Int      @id @default(autoincrement())
+  moduleId      Int
+  fieldKey      String
+  fieldLabel    String
+  fieldType     String   // TEXT, NUMBER, BOOLEAN, SELECT
+  selectOptions String?  // JSON array for SELECT type
+  isRequired    Boolean  @default(false)
+  sortOrder     Int      @default(0)
+
+  module       ProductModule @relation(fields: [moduleId], references: [id])
+  variantSpecs VariantSpec[]
+
+  @@unique([moduleId, fieldKey])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PARTY MODEL — universal entity
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Party {
+  id        Int      @id @default(autoincrement())
+  partyCode String   @unique
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roles     PartyRole[]
+  contacts  PartyContact[]
+  locations Location[]
+  customers Customer[]
+  suppliers Supplier[]
+}
+
+model PartyRole {
+  id        Int           @id @default(autoincrement())
+  partyId   Int
+  roleType  PartyRoleType
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+
+  party Party @relation(fields: [partyId], references: [id])
+
+  @@unique([partyId, roleType])
+  @@index([partyId])
+}
+
+model PartyContact {
+  id                  Int         @id @default(autoincrement())
+  partyId             Int
+  name                String?
+  title               String?
+  email               String?
+  phone               String?
+  contactType         ContactType
+  isPrimary           Boolean     @default(false)
+  invoiceDistribution Boolean     @default(false)
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id])
+
+  @@index([partyId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,21 +380,27 @@ model User {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Location {
-  id           Int          @id @default(autoincrement())
-  name         String       @unique
-  locationType LocationType @default(OWN_PLANT)
-  isRegistered Boolean      @default(false)
-  isDefault    Boolean      @default(false)
-  street       String?
-  city         String?
-  state        String?
-  zip          String?
-  country      String?      @default("US")
-  phone        String?
-  email        String?
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
+  id                   Int          @id @default(autoincrement())
+  name                 String       @unique
+  locationType         LocationType @default(OWN_PLANT)
+  partyId              Int?
+  isRegistered         Boolean      @default(false)
+  isDefault            Boolean      @default(false)
+  street               String?
+  city                 String?
+  state                String?
+  zip                  String?
+  country              String?      @default("US")
+  phone                String?
+  email                String?
+  contactName          String?
+  contactPhone         String?
+  contactEmail         String?
+  deliveryInstructions String?
+  isActive             Boolean      @default(true)
+  createdAt            DateTime     @default(now())
 
+  party                  Party?                   @relation(fields: [partyId], references: [id])
   inventory              MaterialInventory[]
   receipts               MaterialReceipt[]
   transactions           MaterialTransaction[]
@@ -310,14 +411,17 @@ model Location {
   productionConsumptions ProductionConsumption[]
   transfersFrom          InventoryTransfer[]      @relation("TransferFrom")
   transfersTo            InventoryTransfer[]      @relation("TransferTo")
-  equipment              Equipment[]
-  workCenters            WorkCenter[]
+  resources              Resource[]
+  inventoryCommitments   InventoryCommitment[]
+
+  @@index([partyId])
 }
 
 model Customer {
   id                       Int      @id @default(autoincrement())
   code                     String   @unique
   name                     String
+  partyId                  Int?
   accountNumber            String?
   taxId                    String?
   resaleCertificateNumber  String?
@@ -344,84 +448,25 @@ model Customer {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  paymentTerm    PaymentTerm?      @relation(fields: [paymentTermId], references: [id])
-  defaultSalesRep User?            @relation("CustomerSalesRep", fields: [defaultSalesRepId], references: [id])
-  contacts       CustomerContact[]
-  shipToAddresses ShipToAddress[]
-  quotes         Quote[]
-  orders         SalesOrder[]
-  invoices       Invoice[]
-  tooling        Tooling[]
+  party           Party?        @relation(fields: [partyId], references: [id])
+  paymentTerm     PaymentTerm?  @relation(fields: [paymentTermId], references: [id])
+  defaultSalesRep User?         @relation("CustomerSalesRep", fields: [defaultSalesRepId], references: [id])
+  quotes          Quote[]
+  orders          SalesOrder[]
+  invoices        Invoice[]
+  tooling         Tooling[]
+  customerItems   CustomerItem[]
 
+  @@index([partyId])
   @@index([defaultSalesRepId])
   @@index([paymentTermId])
-}
-
-model CustomerContact {
-  id                   Int         @id @default(autoincrement())
-  customerId           Int
-  name                 String
-  title                String?
-  email                String?
-  phone                String?
-  contactType          ContactType
-  isPrimary            Boolean     @default(false)
-  invoiceDistribution  Boolean     @default(false)
-  isActive             Boolean     @default(true)
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
-
-  customer Customer @relation(fields: [customerId], references: [id])
-
-  @@index([customerId])
-}
-
-model ShipToAddress {
-  id                   Int      @id @default(autoincrement())
-  customerId           Int
-  locationName         String
-  street               String?
-  city                 String?
-  state                String?
-  zip                  String?
-  country              String?  @default("US")
-  contactName          String?
-  contactPhone         String?
-  contactEmail         String?
-  isDefault            Boolean  @default(false)
-  deliveryInstructions String?
-  isActive             Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-
-  customer Customer @relation(fields: [customerId], references: [id])
-
-  @@index([customerId])
-}
-
-model WorkCenter {
-  id               Int      @id @default(autoincrement())
-  name             String   @unique
-  workCenterTypeId Int?
-  description      String?
-  locationId       Int?
-  equipmentId      Int?
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-
-  workCenterType WorkCenterType? @relation(fields: [workCenterTypeId], references: [id])
-  location       Location?       @relation(fields: [locationId], references: [id])
-  equipment      Equipment?      @relation(fields: [equipmentId], references: [id])
-  jobs           ProductionJob[]
-
-  @@index([workCenterTypeId])
-  @@index([locationId])
 }
 
 model Supplier {
   id              Int      @id @default(autoincrement())
   code            String   @unique
   name            String
+  partyId         Int?
   accountNumber   String?
   taxId           String?
   is1099Eligible  Boolean  @default(false)
@@ -438,95 +483,91 @@ model Supplier {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  paymentTerm    PaymentTerm?      @relation(fields: [paymentTermId], references: [id])
-  contacts       SupplierContact[]
+  party          Party?           @relation(fields: [partyId], references: [id])
+  paymentTerm    PaymentTerm?     @relation(fields: [paymentTermId], references: [id])
   purchaseOrders PurchaseOrder[]
-  partsForEquipment Equipment[]
-}
+  resources      Resource[]
 
-model SupplierContact {
-  id                  Int         @id @default(autoincrement())
-  supplierId          Int
-  name                String
-  title               String?
-  email               String?
-  phone               String?
-  contactType         ContactType
-  isPrimary           Boolean     @default(false)
-  invoiceDistribution Boolean     @default(false)
-  isActive            Boolean     @default(true)
-  createdAt           DateTime    @default(now())
-  updatedAt           DateTime    @updatedAt
-
-  supplier Supplier @relation(fields: [supplierId], references: [id])
-
-  @@index([supplierId])
+  @@index([partyId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EQUIPMENT & OPERATIONS
+// RESOURCES & OPERATIONS (replaces WorkCenter + Equipment)
 // ─────────────────────────────────────────────────────────────────────────────
 
-model Equipment {
-  id                  Int      @id @default(autoincrement())
-  name                String
-  equipmentTypeId     Int
-  locationId          Int
-  manufacturer        String?
-  modelNumber         String?
-  serialNumber        String?
-  yearOfManufacture   Int?
-  maxSheetWidth       Decimal? @db.Decimal(8, 3)
-  maxSheetLength      Decimal? @db.Decimal(8, 3)
-  minSheetWidth       Decimal? @db.Decimal(8, 3)
-  minSheetLength      Decimal? @db.Decimal(8, 3)
-  maxSpeed            Decimal? @db.Decimal(10, 2)
-  purchaseDate        DateTime?
-  purchasePrice       Decimal? @db.Decimal(12, 2)
-  warrantyExpiry      DateTime?
-  lastServiceDate     DateTime?
-  nextServiceDue      DateTime?
-  assetTagId          String?
-  partsSupplierId     Int?
-  notes               String?
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+model Resource {
+  id                Int      @id @default(autoincrement())
+  name              String   @unique
+  resourceTypeId    Int
+  locationId        Int
+  description       String?
+  manufacturer      String?
+  modelNumber       String?
+  serialNumber      String?
+  yearOfManufacture Int?
+  maxSheetWidth     Decimal? @db.Decimal(8, 3)
+  maxSheetLength    Decimal? @db.Decimal(8, 3)
+  minSheetWidth     Decimal? @db.Decimal(8, 3)
+  minSheetLength    Decimal? @db.Decimal(8, 3)
+  maxSpeed          Decimal? @db.Decimal(10, 2)
+  purchaseDate      DateTime?
+  purchasePrice     Decimal? @db.Decimal(12, 2)
+  warrantyExpiry    DateTime?
+  lastServiceDate   DateTime?
+  nextServiceDue    DateTime?
+  assetTagId        String?
+  partsSupplierId   Int?
+  notes             String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  equipmentType  WorkCenterType       @relation(fields: [equipmentTypeId], references: [id])
-  location       Location             @relation(fields: [locationId], references: [id])
-  partsSupplier  Supplier?            @relation(fields: [partsSupplierId], references: [id])
-  capabilities   EquipmentCapability[]
-  workCenters    WorkCenter[]
+  resourceType  ResourceType         @relation(fields: [resourceTypeId], references: [id])
+  location      Location             @relation(fields: [locationId], references: [id])
+  partsSupplier Supplier?            @relation(fields: [partsSupplierId], references: [id])
+  capabilities  ResourceCapability[]
+  jobs          ProductionJob[]
 
-  @@index([equipmentTypeId])
+  @@index([resourceTypeId])
   @@index([locationId])
   @@index([partsSupplierId])
 }
 
 model Operation {
-  id                     Int      @id @default(autoincrement())
-  operationKey           String   @unique
-  operationName          String
-  defaultEquipmentTypeId Int?
-  isActive               Boolean  @default(true)
-  sortOrder              Int      @default(0)
+  id            Int      @id @default(autoincrement())
+  operationKey  String   @unique
+  operationName String
+  isActive      Boolean  @default(true)
+  sortOrder     Int      @default(0)
 
-  defaultEquipmentType WorkCenterType?      @relation(fields: [defaultEquipmentTypeId], references: [id])
-  capabilities         EquipmentCapability[]
+  capabilities          ResourceCapability[]
+  operationRequirements OperationRequirement[]
 }
 
-model EquipmentCapability {
+model ResourceCapability {
   id          Int      @id @default(autoincrement())
-  equipmentId Int
+  resourceId  Int
   operationId Int
   maxSpeed    Decimal? @db.Decimal(10, 2)
   notes       String?
 
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  resource  Resource  @relation(fields: [resourceId], references: [id], onDelete: Cascade)
   operation Operation @relation(fields: [operationId], references: [id])
 
-  @@unique([equipmentId, operationId])
+  @@unique([resourceId, operationId])
+}
+
+model OperationRequirement {
+  id             Int     @id @default(autoincrement())
+  operationId    Int
+  resourceTypeId Int
+  isRequired     Boolean @default(true)
+  notes          String?
+
+  operation    Operation    @relation(fields: [operationId], references: [id])
+  resourceType ResourceType @relation(fields: [resourceTypeId], references: [id])
+
+  @@unique([operationId, resourceTypeId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -680,57 +721,84 @@ model PurchaseOrderItem {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PRODUCTS
+// PRODUCTS — now "MasterSpec" (physical manufacturable item)
 // ─────────────────────────────────────────────────────────────────────────────
 
 model ProductCategory {
   id          Int      @id @default(autoincrement())
   name        String
   parentId    Int?
+  moduleId    Int?
   description String?
   isActive    Boolean  @default(true)
   sortOrder   Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  parent   ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children ProductCategory[] @relation("CategoryHierarchy")
-  products Product[]
+  parent      ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    ProductCategory[] @relation("CategoryHierarchy")
+  module      ProductModule?    @relation(fields: [moduleId], references: [id])
+  masterSpecs MasterSpec[]
 
   @@index([parentId])
+  @@index([moduleId])
 }
 
-model Product {
-  id          Int         @id @default(autoincrement())
-  sku         String      @unique
+model MasterSpec {
+  id          Int      @id @default(autoincrement())
+  sku         String   @unique
   name        String
   description String?
-  productType ProductType
   categoryId  Int?
-  isCustom    Boolean     @default(false)
-  listPrice   Decimal?    @db.Decimal(12, 4)
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  isCustom    Boolean  @default(false)
+  listPrice   Decimal? @db.Decimal(12, 4)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  category               ProductCategory?       @relation(fields: [categoryId], references: [id])
-  boxSpec                BoxSpec?               @relation("ProductBoxSpec")
-  blankSpec              BlankSpec?             @relation("ProductBlankSpec")
+  category               ProductCategory?         @relation(fields: [categoryId], references: [id])
+  boxSpec                BoxSpec?                 @relation("MasterSpecBoxSpec")
+  blankSpec              BlankSpec?               @relation("MasterSpecBlankSpec")
   bomLines               BOMLine[]
-  quoteItems             QuoteItem[]
-  orderItems             SalesOrderItem[]
   variants               ProductVariant[]
   specs                  ProductSpec[]
   finishedGoodsInventory FinishedGoodsInventory[]
   inventoryTransfers     InventoryTransfer[]
+  customerItems          CustomerItem[]
+  tooling                Tooling[]
+  inventoryCommitments   InventoryCommitment[]
 
-  @@index([productType])
   @@index([categoryId])
+}
+
+model CustomerItem {
+  id              Int             @id @default(autoincrement())
+  code            String          @unique
+  name            String
+  description     String?
+  customerId      Int
+  masterSpecId    Int?
+  variantId       Int?
+  listPrice       Decimal?        @db.Decimal(12, 4)
+  fulfillmentPath FulfillmentPath @default(MANUFACTURE)
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  customer   Customer        @relation(fields: [customerId], references: [id])
+  masterSpec MasterSpec?     @relation(fields: [masterSpecId], references: [id])
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+  tooling    Tooling[]
+  quoteItems QuoteItem[]
+  orderItems SalesOrderItem[]
+
+  @@index([customerId])
+  @@index([masterSpecId])
 }
 
 model BoxSpec {
   id                Int      @id @default(autoincrement())
-  productId         Int?     @unique
+  masterSpecId      Int?     @unique
   quoteItemId       Int?     @unique
   lengthInches      Decimal  @db.Decimal(8, 3)
   widthInches       Decimal  @db.Decimal(8, 3)
@@ -741,15 +809,15 @@ model BoxSpec {
   hasPerforations   Boolean  @default(false)
   notes             String?
 
-  product   Product?   @relation("ProductBoxSpec",   fields: [productId],   references: [id])
-  quoteItem QuoteItem? @relation("QuoteItemBoxSpec", fields: [quoteItemId], references: [id])
+  masterSpec MasterSpec? @relation("MasterSpecBoxSpec",   fields: [masterSpecId], references: [id])
+  quoteItem  QuoteItem?  @relation("QuoteItemBoxSpec",    fields: [quoteItemId],  references: [id])
 }
 
 model BlankSpec {
-  id          Int    @id @default(autoincrement())
-  productId   Int?   @unique
-  quoteItemId Int?   @unique
-  materialId  Int
+  id           Int    @id @default(autoincrement())
+  masterSpecId Int?   @unique
+  quoteItemId  Int?   @unique
+  materialId   Int
 
   outsPerSheet      Int      @default(1)
   sheetsPerBox      Decimal  @default(1.0) @db.Decimal(8, 4)
@@ -795,8 +863,8 @@ model BlankSpec {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  product         Product?         @relation("ProductBlankSpec",   fields: [productId],        references: [id])
-  quoteItem       QuoteItem?       @relation("QuoteItemBlankSpec", fields: [quoteItemId],       references: [id])
+  masterSpec      MasterSpec?      @relation("MasterSpecBlankSpec", fields: [masterSpecId],    references: [id])
+  quoteItem       QuoteItem?       @relation("QuoteItemBlankSpec",  fields: [quoteItemId],     references: [id])
   material        Material         @relation(fields: [materialId],        references: [id])
   requiredDie     Tooling?         @relation("BlankSpecDie",              fields: [requiredDieId],    references: [id])
   materialVariant MaterialVariant? @relation(fields: [materialVariantId], references: [id])
@@ -804,40 +872,48 @@ model BlankSpec {
 
 model BOMLine {
   id            Int     @id @default(autoincrement())
-  productId     Int
+  masterSpecId  Int
   materialId    Int
   quantityPer   Decimal @db.Decimal(14, 6)
   unitOfMeasure String
 
-  product  Product  @relation(fields: [productId],  references: [id])
-  material Material @relation(fields: [materialId], references: [id])
+  masterSpec MasterSpec @relation(fields: [masterSpecId], references: [id])
+  material   Material   @relation(fields: [materialId],   references: [id])
 
-  @@unique([productId, materialId])
+  @@unique([masterSpecId, materialId])
 }
 
 model Tooling {
-  id          Int           @id @default(autoincrement())
-  toolNumber  String        @unique
-  type        ToolType
-  description String?
-  customerId  Int?
-  condition   ToolCondition
-  locationId  Int
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id             Int           @id @default(autoincrement())
+  toolNumber     String        @unique
+  type           ToolType
+  description    String?
+  customerId     Int?
+  customerItemId Int?
+  masterSpecId   Int?
+  condition      ToolCondition
+  locationId     Int
+  fileUrl        String?
+  fileName       String?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  customer   Customer?   @relation(fields: [customerId], references: [id])
-  location   Location    @relation(fields: [locationId], references: [id])
-  blankSpecs BlankSpec[] @relation("BlankSpecDie")
+  customer     Customer?     @relation(fields: [customerId], references: [id])
+  customerItem CustomerItem? @relation(fields: [customerItemId], references: [id])
+  masterSpec   MasterSpec?   @relation(fields: [masterSpecId], references: [id])
+  location     Location      @relation(fields: [locationId], references: [id])
+  blankSpecs   BlankSpec[]   @relation("BlankSpecDie")
 
   @@index([customerId])
+  @@index([customerItemId])
+  @@index([masterSpecId])
   @@index([type])
 }
 
 model ProductVariant {
   id                 Int      @id @default(autoincrement())
-  productId          Int
+  masterSpecId       Int
   sku                String   @unique
   variantDescription String?
   width              Decimal? @db.Decimal(8, 3)
@@ -850,52 +926,68 @@ model ProductVariant {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  product                Product                @relation(fields: [productId], references: [id])
+  masterSpec             MasterSpec               @relation(fields: [masterSpecId], references: [id])
+  variantSpecs           VariantSpec[]
   specs                  ProductSpec[]
   quoteItems             QuoteItem[]
   orderItems             SalesOrderItem[]
   shipmentItems          ShipmentItem[]
   finishedGoodsInventory FinishedGoodsInventory[]
+  customerItems          CustomerItem[]
+  inventoryCommitments   InventoryCommitment[]
 
-  @@index([productId])
+  @@index([masterSpecId])
+}
+
+model VariantSpec {
+  id          Int      @id @default(autoincrement())
+  variantId   Int
+  specFieldId Int
+  value       String
+  createdAt   DateTime @default(now())
+
+  variant   ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  specField ModuleSpecField @relation(fields: [specFieldId], references: [id])
+
+  @@unique([variantId, specFieldId])
 }
 
 model ProductSpec {
-  id        Int    @id @default(autoincrement())
-  productId Int
-  variantId Int?
-  specKey   String
-  specValue String
-  specUnit  String?
-  sortOrder Int?
+  id           Int     @id @default(autoincrement())
+  masterSpecId Int
+  variantId    Int?
+  specKey      String
+  specValue    String
+  specUnit     String?
+  sortOrder    Int?
 
-  product Product         @relation(fields: [productId], references: [id])
-  variant ProductVariant? @relation(fields: [variantId], references: [id])
+  masterSpec MasterSpec      @relation(fields: [masterSpecId], references: [id])
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
 
-  @@index([productId])
+  @@index([masterSpecId])
 }
 
 model FinishedGoodsInventory {
-  id         Int      @id @default(autoincrement())
-  productId  Int
-  variantId  Int?
-  locationId Int
-  quantity   Decimal  @default(0) @db.Decimal(14, 4)
-  avgCost    Decimal? @db.Decimal(12, 4)
-  updatedAt  DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  masterSpecId Int
+  variantId    Int?
+  locationId   Int
+  quantity     Decimal  @default(0) @db.Decimal(14, 4)
+  avgCost      Decimal? @db.Decimal(12, 4)
+  updatedAt    DateTime @updatedAt
 
-  product  Product         @relation(fields: [productId], references: [id])
-  variant  ProductVariant? @relation(fields: [variantId], references: [id])
-  location Location        @relation(fields: [locationId], references: [id])
+  masterSpec MasterSpec      @relation(fields: [masterSpecId], references: [id])
+  variant    ProductVariant? @relation(fields: [variantId], references: [id])
+  location   Location        @relation(fields: [locationId], references: [id])
 
-  @@index([productId])
+  @@index([masterSpecId])
   @@index([locationId])
 }
 
 model InventoryTransfer {
   id              Int            @id @default(autoincrement())
   materialId      Int?
-  productId       Int?
+  masterSpecId    Int?
   variantId       Int?
   fromLocationId  Int
   toLocationId    Int
@@ -906,14 +998,14 @@ model InventoryTransfer {
   status          TransferStatus @default(PENDING)
 
   material        Material?        @relation(fields: [materialId],       references: [id])
-  product         Product?         @relation(fields: [productId],        references: [id])
+  masterSpec      MasterSpec?      @relation(fields: [masterSpecId],     references: [id])
   materialVariant MaterialVariant? @relation(fields: [variantId],        references: [id])
   fromLocation    Location         @relation("TransferFrom", fields: [fromLocationId], references: [id])
   toLocation      Location         @relation("TransferTo",   fields: [toLocationId],   references: [id])
   transferredBy   User             @relation(fields: [transferredById],  references: [id])
 
   @@index([materialId])
-  @@index([productId])
+  @@index([masterSpecId])
   @@index([fromLocationId])
   @@index([toLocationId])
 }
@@ -943,23 +1035,23 @@ model Quote {
 }
 
 model QuoteItem {
-  id          Int     @id @default(autoincrement())
-  quoteId     Int
-  productId   Int?
-  variantId   Int?
-  lineNumber  Int
-  description String
-  quantity    Int
-  unitPrice   Decimal @db.Decimal(12, 4)
-  notes       String?
+  id             Int     @id @default(autoincrement())
+  quoteId        Int
+  customerItemId Int?
+  variantId      Int?
+  lineNumber     Int
+  description    String
+  quantity       Int
+  unitPrice      Decimal @db.Decimal(12, 4)
+  notes          String?
 
-  quote      Quote              @relation(fields: [quoteId],    references: [id], onDelete: Cascade)
-  product    Product?           @relation(fields: [productId],  references: [id])
-  variant    ProductVariant?    @relation(fields: [variantId],  references: [id])
-  boxSpec    BoxSpec?           @relation("QuoteItemBoxSpec")
-  blankSpec  BlankSpec?         @relation("QuoteItemBlankSpec")
-  bomLines   QuoteItemBOMLine[]
-  orderItems SalesOrderItem[]
+  quote        Quote              @relation(fields: [quoteId],        references: [id], onDelete: Cascade)
+  customerItem CustomerItem?      @relation(fields: [customerItemId], references: [id])
+  variant      ProductVariant?    @relation(fields: [variantId],      references: [id])
+  boxSpec      BoxSpec?           @relation("QuoteItemBoxSpec")
+  blankSpec    BlankSpec?         @relation("QuoteItemBlankSpec")
+  bomLines     QuoteItemBOMLine[]
+  orderItems   SalesOrderItem[]
 
   @@unique([quoteId, lineNumber])
   @@index([quoteId])
@@ -1015,7 +1107,7 @@ model SalesOrderItem {
   id                Int      @id @default(autoincrement())
   orderId           Int
   quoteItemId       Int?
-  productId         Int?
+  customerItemId    Int?
   variantId         Int?
   lineNumber        Int
   description       String
@@ -1025,15 +1117,38 @@ model SalesOrderItem {
   toleranceOverride Boolean  @default(false)
   qtyTolerance      Decimal? @db.Decimal(6, 2)
 
-  order         SalesOrder      @relation(fields: [orderId],     references: [id], onDelete: Cascade)
-  quoteItem     QuoteItem?      @relation(fields: [quoteItemId], references: [id])
-  product       Product?        @relation(fields: [productId],   references: [id])
-  variant       ProductVariant? @relation(fields: [variantId],   references: [id])
-  jobs          ProductionJob[]
-  shipmentItems ShipmentItem[]
+  order                SalesOrder           @relation(fields: [orderId],         references: [id], onDelete: Cascade)
+  quoteItem            QuoteItem?           @relation(fields: [quoteItemId],     references: [id])
+  customerItem         CustomerItem?        @relation(fields: [customerItemId],  references: [id])
+  variant              ProductVariant?      @relation(fields: [variantId],       references: [id])
+  jobs                 ProductionJob[]
+  shipmentItems        ShipmentItem[]
+  inventoryCommitments InventoryCommitment[]
 
   @@unique([orderId, lineNumber])
   @@index([orderId])
+}
+
+model InventoryCommitment {
+  id           Int              @id @default(autoincrement())
+  orderItemId  Int
+  masterSpecId Int?
+  variantId    Int?
+  locationId   Int
+  quantity     Decimal          @db.Decimal(14, 4)
+  status       CommitmentStatus @default(PENDING)
+  committedAt  DateTime         @default(now())
+  releasedAt   DateTime?
+  notes        String?
+
+  orderItem  SalesOrderItem  @relation(fields: [orderItemId],  references: [id])
+  masterSpec MasterSpec?     @relation(fields: [masterSpecId], references: [id])
+  variant    ProductVariant? @relation(fields: [variantId],    references: [id])
+  location   Location        @relation(fields: [locationId],   references: [id])
+
+  @@index([orderItemId])
+  @@index([masterSpecId])
+  @@index([locationId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1044,7 +1159,7 @@ model ProductionJob {
   id                    Int          @id @default(autoincrement())
   jobNumber             String       @unique
   orderItemId           Int
-  workCenterId          Int
+  resourceId            Int
   locationId            Int
   sequence              Int
   status                JobStatus    @default(QUEUED)
@@ -1070,13 +1185,13 @@ model ProductionJob {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  orderItem    SalesOrderItem        @relation(fields: [orderItemId],  references: [id])
-  workCenter   WorkCenter            @relation(fields: [workCenterId], references: [id])
-  location     Location              @relation(fields: [locationId],   references: [id])
+  orderItem    SalesOrderItem        @relation(fields: [orderItemId], references: [id])
+  resource     Resource              @relation(fields: [resourceId],  references: [id])
+  location     Location              @relation(fields: [locationId],  references: [id])
   consumptions ProductionConsumption[]
 
   @@index([status])
-  @@index([workCenterId])
+  @@index([resourceId])
   @@index([scheduledDate])
 }
 
@@ -1142,7 +1257,7 @@ model Shipment {
 }
 
 model ShipmentItem {
-  id                  Int     @id @default(autoincrement())
+  id                  Int      @id @default(autoincrement())
   shipmentId          Int
   orderItemId         Int
   variantId           Int?

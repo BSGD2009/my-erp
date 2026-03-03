@@ -17,6 +17,8 @@ interface Supplier {
   street?: string; city?: string; state?: string; zip?: string; country?: string;
   paymentTermId?: number; creditLimit?: number; w9OnFile: boolean; isActive: boolean; notes?: string;
   paymentTerm?: PaymentTerm;
+  partyId: number | null;
+  party?: { contacts: Contact[] };
   contacts: Contact[];
   _count: { purchaseOrders: number };
 }
@@ -118,7 +120,8 @@ export function SupplierRecordPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const s = await api.get<Supplier>(`/protected/suppliers/${id}`);
+      const raw = await api.get<any>(`/protected/suppliers/${id}`);
+      const s: Supplier = { ...raw, contacts: raw.party?.contacts ?? [] };
       setSupplier(s);
       setF({
         code: s.code, name: s.name, accountNumber: s.accountNumber ?? '', taxId: s.taxId ?? '',

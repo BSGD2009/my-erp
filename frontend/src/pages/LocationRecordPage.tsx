@@ -8,7 +8,10 @@ interface Location {
   id: number; name: string; locationType: string; isRegistered: boolean;
   isDefault: boolean; street?: string; city?: string; state?: string;
   zip?: string; country?: string; phone?: string; email?: string; isActive: boolean;
-  _count?: { inventory: number; equipment: number; workCenters: number };
+  party?: { id: number; partyCode: string; name: string };
+  contactName?: string; contactPhone?: string; contactEmail?: string;
+  deliveryInstructions?: string;
+  _count?: { inventory: number; resources: number };
   createdAt: string; updatedAt: string;
 }
 
@@ -160,8 +163,7 @@ export function LocationRecordPage() {
         <div style={{ display: 'flex', gap: '1.25rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
           {[
             { label: 'Inventory Items', count: location._count.inventory },
-            { label: 'Equipment', count: location._count.equipment },
-            { label: 'Work Centers', count: location._count.workCenters },
+            { label: 'Resources', count: location._count.resources },
           ].map(({ label, count }) => (
             <div key={label} style={{ ...cardStyle, padding: '0.85rem 1.25rem', minWidth: 120 }}>
               <div style={{ fontSize: '1.1rem', fontWeight: 700, color: c.textPrimary }}>{count}</div>

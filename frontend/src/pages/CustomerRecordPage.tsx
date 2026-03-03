@@ -30,7 +30,7 @@ interface Contact {
 
 interface ShipTo {
   id: number;
-  locationName: string;
+  name: string;
   street: string | null;
   city: string | null;
   state: string | null;
@@ -71,8 +71,10 @@ interface Customer {
   isActive: boolean;
   paymentTerm: PaymentTerm | null;
   defaultSalesRep: { id: number; name: string } | null;
+  partyId: number | null;
+  party?: { contacts: Contact[] };
   contacts: Contact[];
-  shipToAddresses: ShipTo[];
+  shipToLocations: ShipTo[];
   _count: { orders: number; invoices: number };
 }
 
@@ -183,7 +185,7 @@ export function CustomerRecordPage() {
   const [shipToDrawerOpen, setShipToDrawerOpen] = useState(false);
   const [editingShipTo, setEditingShipTo] = useState<ShipTo | null>(null);
   const [shipToForm, setShipToForm] = useState({
-    locationName: '', street: '', city: '', state: '', zip: '', country: 'US',
+    name: '', street: '', city: '', state: '', zip: '', country: 'US',
     contactName: '', contactPhone: '', contactEmail: '', isDefault: false, deliveryInstructions: '',
   });
 
@@ -198,7 +200,13 @@ export function CustomerRecordPage() {
     setLoading(true);
     setNotFound(false);
     try {
-      const cust = await api.get<Customer>(`/protected/customers/${id}`);
+      const raw = await api.get<any>(`/protected/customers/${id}`);
+      // Flatten party.contacts to top-level contacts for backward compat
+      const cust: Customer = {
+        ...raw,
+        contacts: raw.party?.contacts ?? [],
+        shipToLocations: raw.shipToLocations ?? [],
+      };
       setCustomer(cust);
       setForm({
         code: cust.code,
@@ -345,7 +353,7 @@ export function CustomerRecordPage() {
   function openAddShipTo() {
     setEditingShipTo(null);
     setShipToForm({
-      locationName: '', street: '', city: '', state: '', zip: '', country: 'US',
+      name: '', street: '', city: '', state: '', zip: '', country: 'US',
       contactName: '', contactPhone: '', contactEmail: '', isDefault: false, deliveryInstructions: '',
     });
     setShipToDrawerOpen(true);
@@ -354,7 +362,7 @@ export function CustomerRecordPage() {
   function openEditShipTo(addr: ShipTo) {
     setEditingShipTo(addr);
     setShipToForm({
-      locationName: addr.locationName,
+      name: addr.name,
       street: addr.street ?? '',
       city: addr.city ?? '',
       state: addr.state ?? '',
@@ -373,7 +381,7 @@ export function CustomerRecordPage() {
     if (!customer) return;
     try {
       const body = {
-        locationName: shipToForm.locationName,
+        name: shipToForm.name,
         street: shipToForm.street || null,
         city: shipToForm.city || null,
         state: shipToForm.state || null,
@@ -402,7 +410,7 @@ export function CustomerRecordPage() {
 
   async function deactivateShipTo(addr: ShipTo) {
     if (!customer) return;
-    if (!confirm(`Deactivate ship-to "${addr.locationName}"?`)) return;
+    if (!confirm(`Deactivate ship-to "${addr.name}"?`)) return;
     try {
       await api.delete(`/protected/customers/${customer.id}/ship-to/${addr.id}`);
       flash('Ship-to address deactivated.');
@@ -775,7 +783,7 @@ export function CustomerRecordPage() {
             <button style={btnPrimary} onClick={openAddShipTo}>+ Add Ship-To</button>
           </div>
 
-          {customer.shipToAddresses.length === 0 ? (
+          {customer.shipToLocations.length === 0 ? (
             <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>
               No ship-to addresses yet. Click "+ Add Ship-To" to create one.
             </div>
@@ -792,14 +800,14 @@ export function CustomerRecordPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {customer.shipToAddresses.map(addr => (
+                  {customer.shipToLocations.map(addr => (
                     <tr
                       key={addr.id}
                       style={{ borderBottom: `1px solid ${c.divider}`, transition: 'background 0.1s' }}
                       onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
                       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                     >
-                      <td style={{ ...tdStyle, fontWeight: 500 }}>{addr.locationName}</td>
+                      <td style={{ ...tdStyle, fontWeight: 500 }}>{addr.name}</td>
                       <td style={{ ...tdStyle, color: c.textLabel }}>
                         {[addr.city, addr.state].filter(Boolean).join(', ') || '--'}
                       </td>
@@ -842,7 +850,7 @@ export function CustomerRecordPage() {
             title={editingShipTo ? 'Edit Ship-To Address' : 'Add Ship-To Address'}
           >
             <Field label="Location Name *">
-              <input style={inputStyle} value={shipToForm.locationName} onChange={setShipToField('locationName')} />
+              <input style={inputStyle} value={shipToForm.name} onChange={setShipToField('name')} />
             </Field>
             <Field label="Street">
               <input style={inputStyle} value={shipToForm.street} onChange={setShipToField('street')} />

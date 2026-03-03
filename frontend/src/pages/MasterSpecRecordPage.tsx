@@ -1,19 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Layout } from '../components/Layout';
+import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
 import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle } from '../theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
-interface Product {
+interface MasterSpec {
   id: number; sku: string; name: string; description?: string;
-  productType: string; categoryId?: number; isCustom: boolean;
-  listPrice?: string; isActive: boolean; createdAt: string; updatedAt: string;
+  categoryId?: number; isActive: boolean; createdAt: string; updatedAt: string;
   category?: { id: number; name: string };
   boxSpec?: BoxSpec; blankSpec?: BlankSpec;
   bomLines: BOMLine[]; variants: Variant[]; specs: Spec[];
+  customerItems: CustomerItem[];
   finishedGoodsInventory: FGInventory[];
 }
 interface BoxSpec { id: number; lengthInches: string; widthInches: string; heightInches: string; outsideDimensions: boolean; style: string; hasDieCut: boolean; hasPerforations: boolean; notes?: string }
@@ -21,6 +22,7 @@ interface BlankSpec { id: number; materialId: number; outsPerSheet: number; shee
 interface Variant { id: number; sku: string; variantDescription?: string; width?: string; length?: string; thickness?: string; bundleQty?: number; caseQty?: number; listPrice?: string; isActive: boolean }
 interface Spec { id: number; specKey: string; specValue: string; specUnit?: string; sortOrder?: number; variantId?: number }
 interface BOMLine { id: number; materialId: number; quantityPer: string; unitOfMeasure: string; material: { id: number; code: string; name: string; unitOfMeasure: string } }
+interface CustomerItem { id: number; itemCode: string; description?: string; customer: { id: number; name: string; code: string } }
 interface FGInventory { id: number; locationId: number; quantity: string; avgCost?: string; location: { id: number; name: string }; variant?: { id: number; sku: string } }
 interface Category { id: number; name: string }
 interface Material { id: number; code: string; name: string; unitOfMeasure: string }
@@ -28,9 +30,6 @@ interface Material { id: number; code: string; name: string; unitOfMeasure: stri
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-const TYPE_LABEL: Record<string, string> = { CORRUGATED_BOX: 'Corrugated Box', PACKAGING_SUPPLY: 'Packaging Supply', RESALE: 'Resale', LABOR_SERVICE: 'Labor / Service', OTHER: 'Other' };
-const TYPE_COLOR: Record<string, string> = { CORRUGATED_BOX: '#60a5fa', PACKAGING_SUPPLY: '#c084fc', RESALE: '#2dd4bf', LABOR_SERVICE: '#fbbf24', OTHER: '#94a3b8' };
-
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: '1rem' }}>
@@ -77,17 +76,17 @@ const SELECT_OPTS = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ProductRecordPage
+// MasterSpecRecordPage
 // ─────────────────────────────────────────────────────────────────────────────
-export function ProductRecordPage() {
+export function MasterSpecRecordPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isNew = id === 'new';
 
-  const [product, setProduct]   = useState<Product | null>(null);
-  const [loading, setLoading]   = useState(!isNew);
-  const [activeTab, setTab]     = useState('details');
-  const [msg, setMsg]           = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [spec, setSpec]           = useState<MasterSpec | null>(null);
+  const [loading, setLoading]     = useState(!isNew);
+  const [activeTab, setTab]       = useState('Details');
+  const [msg, setMsg]             = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // Categories and materials for selectors
   const [categories, setCategories] = useState<Category[]>([]);
@@ -99,13 +98,13 @@ export function ProductRecordPage() {
     api.get<{ data: Material[] }>('/protected/materials?limit=500').then(r => setMaterials(r.data)).catch(() => {});
   }, []);
 
-  // ── Load product ──
-  const loadProduct = useCallback(async () => {
+  // ── Load master spec ──
+  const loadSpec = useCallback(async () => {
     if (isNew) return;
     setLoading(true);
     try {
-      const p = await api.get<Product>(`/protected/products/${id}`);
-      setProduct(p);
+      const s = await api.get<MasterSpec>(`/protected/master-specs/${id}`);
+      setSpec(s);
     } catch (e: any) {
       setMsg({ text: e.message, type: 'error' });
     } finally {
@@ -113,34 +112,23 @@ export function ProductRecordPage() {
     }
   }, [id, isNew]);
 
-  useEffect(() => { loadProduct(); }, [loadProduct]);
+  useEffect(() => { loadSpec(); }, [loadSpec]);
 
   function flash(text: string, type: 'success' | 'error' = 'success') {
     setMsg({ text, type });
     if (type === 'success') setTimeout(() => setMsg(null), 3500);
   }
 
-  // ── Build tabs based on productType ──
-  const tabs = ['Details'];
-  if (product?.productType === 'CORRUGATED_BOX') {
-    tabs.push('Box Spec', 'Blank Spec');
-  }
-  if (product && product.productType !== 'LABOR_SERVICE') {
-    tabs.push('Variants');
-  }
-  if (product && ['PACKAGING_SUPPLY', 'OTHER'].includes(product.productType)) {
-    tabs.push('Specs');
-  }
-  tabs.push('BOM', 'Inventory');
+  // ── Build tabs ──
+  const tabs = ['Details', 'Box Spec', 'Blank Spec', 'Variants', 'Specs', 'BOM', 'Customer Items', 'Inventory'];
 
   // ── Status pipeline ──
   function pipeline() {
-    if (!product) return null;
-    const isBox = product.productType === 'CORRUGATED_BOX';
+    if (!spec) return null;
     const steps = [
       { label: 'Created',    done: true },
-      { label: 'Specified',  done: isBox ? !!(product.boxSpec && product.blankSpec) : product.bomLines.length > 0 || product.variants.length > 0 },
-      { label: 'Active',     done: product.isActive },
+      { label: 'Specified',  done: !!(spec.boxSpec && spec.blankSpec) || spec.bomLines.length > 0 || spec.variants.length > 0 },
+      { label: 'Active',     done: spec.isActive },
     ];
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: '1.5rem' }}>
@@ -160,48 +148,42 @@ export function ProductRecordPage() {
     );
   }
 
-  if (loading) return <Layout><div style={{ color: c.textMuted, padding: '3rem', textAlign: 'center' }}>Loading…</div></Layout>;
+  if (loading) return <Layout><div style={{ color: c.textMuted, padding: '3rem', textAlign: 'center' }}>Loading...</div></Layout>;
 
   return (
     <Layout>
       {/* ── Breadcrumb ── */}
       <div style={{ fontSize: '0.8rem', color: c.textMuted, marginBottom: '0.75rem' }}>
-        <span style={{ cursor: 'pointer', color: c.accent }} onClick={() => navigate('/products')}>Products</span>
-        {product && <> &rsaquo; <span style={{ color: c.textLabel }}>{product.sku}</span></>}
-        {isNew && <> &rsaquo; <span style={{ color: c.textLabel }}>New Product</span></>}
+        <span style={{ cursor: 'pointer', color: c.accent }} onClick={() => navigate('/master-specs')}>Master Specs</span>
+        {spec && <> &rsaquo; <span style={{ color: c.textLabel }}>{spec.sku}</span></>}
+        {isNew && <> &rsaquo; <span style={{ color: c.textLabel }}>New Master Spec</span></>}
       </div>
 
       {msg && <Toast msg={msg.text} type={msg.type} />}
 
       {/* ── Header ── */}
-      {product && (
+      {spec && (
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>{product.name}</h1>
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: 4, background: `${TYPE_COLOR[product.productType]}20`, color: TYPE_COLOR[product.productType], letterSpacing: '0.03em' }}>
-                {TYPE_LABEL[product.productType]}
-              </span>
-              {!product.isActive && (
+              <h1 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>{spec.name}</h1>
+              {!spec.isActive && (
                 <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: 'rgba(100,116,139,0.15)', color: '#64748b' }}>INACTIVE</span>
-              )}
-              {product.isCustom && (
-                <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: 'rgba(168,85,247,0.12)', color: '#c084fc' }}>CUSTOM</span>
               )}
             </div>
             <div style={{ fontSize: '0.82rem', color: c.textMuted, marginTop: 4 }}>
-              SKU: <span style={{ fontFamily: 'monospace', color: c.textLabel }}>{product.sku}</span>
-              {product.category && <> &nbsp;·&nbsp; {product.category.name}</>}
+              SKU: <span style={{ fontFamily: 'monospace', color: c.textLabel }}>{spec.sku}</span>
+              {spec.category && <> &nbsp;&middot;&nbsp; {spec.category.name}</>}
             </div>
           </div>
         </div>
       )}
 
       {/* ── Status pipeline ── */}
-      {product && pipeline()}
+      {spec && pipeline()}
 
       {/* ── Tabs ── */}
-      {product && (
+      {spec && (
         <div style={{ borderBottom: `1px solid ${c.cardBorder}`, marginBottom: '1.5rem', display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           {tabs.map(t => (
             <button
@@ -216,35 +198,36 @@ export function ProductRecordPage() {
       )}
 
       {/* ── Tab content ── */}
-      {isNew && <NewProductForm categories={categories} onCreated={p => { setProduct(p); navigate(`/products/${p.id}`); setTab('details'); }} />}
-      {product && activeTab === 'Details'   && <DetailsTab    product={product} categories={categories} onUpdated={setProduct} flash={flash} />}
-      {product && activeTab === 'Box Spec'  && <BoxSpecTab    product={product} onUpdated={setProduct} flash={flash} />}
-      {product && activeTab === 'Blank Spec'&& <BlankSpecTab  product={product} materials={materials}  onUpdated={setProduct} flash={flash} />}
-      {product && activeTab === 'Variants'  && <VariantsTab   product={product} onUpdated={loadProduct} flash={flash} />}
-      {product && activeTab === 'Specs'     && <SpecsTab      product={product} onUpdated={loadProduct} flash={flash} />}
-      {product && activeTab === 'BOM'       && <BOMTab        product={product} materials={materials}   onUpdated={loadProduct} flash={flash} />}
-      {product && activeTab === 'Inventory' && <InventoryTab  product={product} />}
+      {isNew && <NewSpecForm categories={categories} onCreated={s => { setSpec(s); navigate(`/master-specs/${s.id}`); setTab('Details'); }} />}
+      {spec && activeTab === 'Details'        && <DetailsTab       spec={spec} categories={categories} onUpdated={setSpec} flash={flash} />}
+      {spec && activeTab === 'Box Spec'       && <BoxSpecTab       spec={spec} onUpdated={setSpec} flash={flash} />}
+      {spec && activeTab === 'Blank Spec'     && <BlankSpecTab     spec={spec} materials={materials} onUpdated={setSpec} flash={flash} />}
+      {spec && activeTab === 'Variants'       && <VariantsTab      spec={spec} onUpdated={loadSpec} flash={flash} />}
+      {spec && activeTab === 'Specs'          && <SpecsTab         spec={spec} onUpdated={loadSpec} flash={flash} />}
+      {spec && activeTab === 'BOM'            && <BOMTab           spec={spec} materials={materials} onUpdated={loadSpec} flash={flash} />}
+      {spec && activeTab === 'Customer Items' && <CustomerItemsTab spec={spec} />}
+      {spec && activeTab === 'Inventory'      && <InventoryTab     spec={spec} />}
     </Layout>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// New Product Form (shown when id = 'new')
+// New Master Spec Form (shown when id = 'new')
 // ─────────────────────────────────────────────────────────────────────────────
-function NewProductForm({ categories, onCreated }: { categories: Category[]; onCreated: (p: Product) => void }) {
-  const [f, setF] = useState({ sku: '', name: '', productType: 'CORRUGATED_BOX', categoryId: '', description: '', listPrice: '', isCustom: false });
+function NewSpecForm({ categories, onCreated }: { categories: Category[]; onCreated: (s: MasterSpec) => void }) {
+  const [f, setF] = useState({ name: '', sku: '', categoryId: '', description: '' });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
   async function save() {
     setSaving(true); setErr('');
     try {
-      const body: Record<string, unknown> = { sku: f.sku, name: f.name, productType: f.productType, isCustom: f.isCustom };
-      if (f.categoryId) body.categoryId = parseInt(f.categoryId);
-      if (f.description) body.description = f.description;
-      if (f.listPrice)   body.listPrice   = parseFloat(f.listPrice);
-      const p = await api.post<Product>('/protected/products', body);
-      onCreated(p);
+      const body: Record<string, unknown> = { name: f.name };
+      if (f.sku.trim())          body.sku = f.sku.trim().toUpperCase();
+      if (f.categoryId)          body.categoryId = parseInt(f.categoryId);
+      if (f.description.trim())  body.description = f.description.trim();
+      const s = await api.post<MasterSpec>('/protected/master-specs', body);
+      onCreated(s);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -257,39 +240,25 @@ function NewProductForm({ categories, onCreated }: { categories: Category[]; onC
 
   return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 600 }}>
-      <h2 style={{ margin: '0 0 1.25rem', fontSize: '1.1rem', fontWeight: 600 }}>New Product</h2>
+      <h2 style={{ margin: '0 0 1.25rem', fontSize: '1.1rem', fontWeight: 600 }}>New Master Spec</h2>
       {err && <Toast msg={err} type="error" />}
 
-      <FormGrid cols={2}>
-        <Field label="SKU *"><input style={inputStyle} value={f.sku} onChange={inp('sku')} placeholder="BOX-12X10X08" /></Field>
-        <Field label="Product Type *">
-          <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.productType} onChange={inp('productType')}>
-            {Object.entries(TYPE_LABEL).map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </Field>
-      </FormGrid>
-
-      <Field label="Name *"><input style={inputStyle} value={f.name} onChange={inp('name')} placeholder="12×10×8 RSC Box" /></Field>
+      <Field label="Name *"><input style={inputStyle} value={f.name} onChange={inp('name')} placeholder="12x10x8 RSC Box" /></Field>
 
       <FormGrid cols={2}>
+        <Field label="SKU (optional, auto-generates)"><input style={inputStyle} value={f.sku} onChange={inp('sku')} placeholder="BOX-12X10X08" /></Field>
         <Field label="Category">
           <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.categoryId} onChange={inp('categoryId')}>
-            <option value="">— None —</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value="">&mdash; None &mdash;</option>
+            {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
           </select>
         </Field>
-        <Field label="List Price"><input style={inputStyle} type="number" value={f.listPrice} onChange={inp('listPrice')} placeholder="0.00" /></Field>
       </FormGrid>
 
       <Field label="Description"><textarea style={{ ...inputStyle, height: 72, resize: 'vertical' }} value={f.description} onChange={inp('description')} /></Field>
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer', marginBottom: '1.25rem' }}>
-        <input type="checkbox" checked={f.isCustom} onChange={e => setF(prev => ({ ...prev, isCustom: e.target.checked }))} />
-        Custom / one-off item (not in standard catalog)
-      </label>
-
       <div style={{ display: 'flex', gap: 8 }}>
-        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Creating…' : 'Create Product'}</button>
+        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Creating...' : 'Create Master Spec'}</button>
       </div>
     </div>
   );
@@ -298,21 +267,20 @@ function NewProductForm({ categories, onCreated }: { categories: Category[]; onC
 // ─────────────────────────────────────────────────────────────────────────────
 // Details Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function DetailsTab({ product, categories, onUpdated, flash }: { product: Product; categories: Category[]; onUpdated: (p: Product) => void; flash: (m: string, t?: 'success'|'error') => void }) {
+function DetailsTab({ spec, categories, onUpdated, flash }: { spec: MasterSpec; categories: Category[]; onUpdated: (s: MasterSpec) => void; flash: (m: string, t?: 'success'|'error') => void }) {
   const [edit, setEdit] = useState(false);
-  const [f, setF] = useState({ name: product.name, description: product.description ?? '', categoryId: String(product.categoryId ?? ''), listPrice: product.listPrice ?? '', isCustom: product.isCustom, isActive: product.isActive });
+  const [f, setF] = useState({ name: spec.name, description: spec.description ?? '', categoryId: String(spec.categoryId ?? ''), isActive: spec.isActive });
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { name: f.name, description: f.description || null, isCustom: f.isCustom, isActive: f.isActive };
+      const body: Record<string, unknown> = { name: f.name, description: f.description || null, isActive: f.isActive };
       body.categoryId = f.categoryId ? parseInt(f.categoryId) : null;
-      body.listPrice  = f.listPrice  ? parseFloat(f.listPrice) : null;
-      const updated = await api.put<Product>(`/protected/products/${product.id}`, body);
+      const updated = await api.put<MasterSpec>(`/protected/master-specs/${spec.id}`, body);
       onUpdated(updated);
       setEdit(false);
-      flash('Product saved.');
+      flash('Master spec saved.');
     } catch (e: any) {
       flash(e.message, 'error');
     } finally {
@@ -326,21 +294,21 @@ function DetailsTab({ product, categories, onUpdated, flash }: { product: Produc
   if (!edit) return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 700 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Product Details</span>
+        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Master Spec Details</span>
         <button style={btnSecondary} onClick={() => setEdit(true)}>Edit</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem 2rem' }}>
-        {[['Name', product.name], ['SKU', product.sku], ['Product Type', TYPE_LABEL[product.productType] ?? product.productType], ['Category', product.category?.name ?? '—'], ['List Price', product.listPrice ? `$${Number(product.listPrice).toFixed(2)}` : '—'], ['Status', product.isActive ? 'Active' : 'Inactive'], ['Custom Item', product.isCustom ? 'Yes' : 'No'], ['Last Updated', new Date(product.updatedAt).toLocaleDateString()]].map(([l, v]) => (
+        {[['Name', spec.name], ['SKU', spec.sku], ['Category', spec.category?.name ?? '\u2014'], ['Status', spec.isActive ? 'Active' : 'Inactive'], ['Last Updated', new Date(spec.updatedAt).toLocaleDateString()]].map(([l, v]) => (
           <div key={l}>
             <div style={{ fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{l}</div>
             <div style={{ fontSize: '0.875rem', color: c.textPrimary }}>{v}</div>
           </div>
         ))}
       </div>
-      {product.description && (
+      {spec.description && (
         <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: `1px solid ${c.divider}` }}>
           <div style={{ fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', marginBottom: 4 }}>Description</div>
-          <div style={{ fontSize: '0.875rem', color: c.textLabel, lineHeight: 1.6 }}>{product.description}</div>
+          <div style={{ fontSize: '0.875rem', color: c.textLabel, lineHeight: 1.6 }}>{spec.description}</div>
         </div>
       )}
     </div>
@@ -348,28 +316,24 @@ function DetailsTab({ product, categories, onUpdated, flash }: { product: Produc
 
   return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 700 }}>
-      <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>Edit Product</h3>
+      <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>Edit Master Spec</h3>
       <Field label="Name *"><input style={inputStyle} value={f.name} onChange={inp('name')} /></Field>
       <FormGrid cols={2}>
         <Field label="Category">
           <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.categoryId} onChange={inp('categoryId')}>
-            <option value="">— None —</option>
+            <option value="">&mdash; None &mdash;</option>
             {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
           </select>
         </Field>
-        <Field label="List Price"><input style={inputStyle} type="number" step="0.0001" value={f.listPrice} onChange={inp('listPrice')} /></Field>
       </FormGrid>
       <Field label="Description"><textarea style={{ ...inputStyle, height: 80, resize: 'vertical' }} value={f.description} onChange={inp('description')} /></Field>
       <div style={{ display: 'flex', gap: 16, marginBottom: '1.25rem' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
-          <input type="checkbox" checked={f.isCustom} onChange={e => setF(p => ({ ...p, isCustom: e.target.checked }))} /> Custom item
-        </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
           <input type="checkbox" checked={f.isActive} onChange={e => setF(p => ({ ...p, isActive: e.target.checked }))} /> Active
         </label>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
         <button style={btnSecondary} onClick={() => setEdit(false)}>Cancel</button>
       </div>
     </div>
@@ -379,38 +343,37 @@ function DetailsTab({ product, categories, onUpdated, flash }: { product: Produc
 // ─────────────────────────────────────────────────────────────────────────────
 // Box Spec Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function BoxSpecTab({ product, onUpdated, flash }: { product: Product; onUpdated: (p: Product) => void; flash: (m: string, t?: 'success'|'error') => void }) {
-  const spec = product.boxSpec;
-  const [edit, setEdit] = useState(!spec);
+function BoxSpecTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: (s: MasterSpec) => void; flash: (m: string, t?: 'success'|'error') => void }) {
+  const box = spec.boxSpec;
+  const [edit, setEdit] = useState(!box);
   const blank = { lengthInches: '', widthInches: '', heightInches: '', outsideDimensions: false, style: 'RSC', hasDieCut: false, hasPerforations: false, notes: '' };
-  const [f, setF] = useState(spec ? { lengthInches: spec.lengthInches, widthInches: spec.widthInches, heightInches: spec.heightInches, outsideDimensions: spec.outsideDimensions, style: spec.style, hasDieCut: spec.hasDieCut, hasPerforations: spec.hasPerforations, notes: spec.notes ?? '' } : blank);
+  const [f, setF] = useState(box ? { lengthInches: box.lengthInches, widthInches: box.widthInches, heightInches: box.heightInches, outsideDimensions: box.outsideDimensions, style: box.style, hasDieCut: box.hasDieCut, hasPerforations: box.hasPerforations, notes: box.notes ?? '' } : blank);
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
     try {
       const body = { ...f, lengthInches: parseFloat(f.lengthInches as any), widthInches: parseFloat(f.widthInches as any), heightInches: parseFloat(f.heightInches as any) };
-      let updated: Product;
-      if (spec) {
-        await api.put(`/protected/products/${product.id}/box-spec`, body);
+      if (box) {
+        await api.put(`/protected/master-specs/${spec.id}/box-spec`, body);
       } else {
-        await api.post(`/protected/products/${product.id}/box-spec`, body);
+        await api.post(`/protected/master-specs/${spec.id}/box-spec`, body);
       }
-      updated = await api.get<Product>(`/protected/products/${product.id}`);
+      const updated = await api.get<MasterSpec>(`/protected/master-specs/${spec.id}`);
       onUpdated(updated);
       setEdit(false);
       flash('Box spec saved.');
     } catch (e: any) { flash(e.message, 'error'); } finally { setSaving(false); }
   }
 
-  if (!edit && spec) return (
+  if (!edit && box) return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 600 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Customer Dimensions (Inside)</span>
         <button style={btnSecondary} onClick={() => setEdit(true)}>Edit</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
-        {[['Length', spec.lengthInches + '"'], ['Width', spec.widthInches + '"'], ['Height', spec.heightInches + '"']].map(([l,v]) => (
+        {[['Length', box.lengthInches + '"'], ['Width', box.widthInches + '"'], ['Height', box.heightInches + '"']].map(([l,v]) => (
           <div key={l} style={{ background: c.inputBg, borderRadius: 8, padding: '0.85rem', textAlign: 'center' }}>
             <div style={{ fontSize: '1.4rem', fontWeight: 700, color: c.accent }}>{v}</div>
             <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: 2, textTransform: 'uppercase' }}>{l}</div>
@@ -418,17 +381,17 @@ function BoxSpecTab({ product, onUpdated, flash }: { product: Product; onUpdated
         ))}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem 2rem', fontSize: '0.85rem' }}>
-        {[['Style', spec.style], ['Outside Dims', spec.outsideDimensions ? 'Yes' : 'No'], ['Die Cut', spec.hasDieCut ? 'Yes' : 'No'], ['Perforations', spec.hasPerforations ? 'Yes' : 'No']].map(([l,v]) => (
+        {[['Style', box.style], ['Outside Dims', box.outsideDimensions ? 'Yes' : 'No'], ['Die Cut', box.hasDieCut ? 'Yes' : 'No'], ['Perforations', box.hasPerforations ? 'Yes' : 'No']].map(([l,v]) => (
           <div key={l}><span style={{ color: c.textMuted }}>{l}:</span> <span style={{ color: c.textPrimary, marginLeft: 4 }}>{v}</span></div>
         ))}
       </div>
-      {spec.notes && <div style={{ marginTop: '0.75rem', fontSize: '0.82rem', color: c.textLabel }}>{spec.notes}</div>}
+      {box.notes && <div style={{ marginTop: '0.75rem', fontSize: '0.82rem', color: c.textLabel }}>{box.notes}</div>}
     </div>
   );
 
   return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 560 }}>
-      <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>{spec ? 'Edit Box Spec' : 'Create Box Spec'}</h3>
+      <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>{box ? 'Edit Box Spec' : 'Create Box Spec'}</h3>
       <FormGrid cols={3}>
         <Field label="Length (in) *"><input style={inputStyle} type="number" step="0.125" value={f.lengthInches as any} onChange={e => setF(p => ({ ...p, lengthInches: e.target.value }))} /></Field>
         <Field label="Width (in) *"><input style={inputStyle} type="number" step="0.125" value={f.widthInches as any} onChange={e => setF(p => ({ ...p, widthInches: e.target.value }))} /></Field>
@@ -450,8 +413,8 @@ function BoxSpecTab({ product, onUpdated, flash }: { product: Product; onUpdated
       </div>
       <Field label="Notes"><textarea style={{ ...inputStyle, height: 60, resize: 'vertical' }} value={f.notes} onChange={e => setF(p => ({ ...p, notes: e.target.value }))} /></Field>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
-        {spec && <button style={btnSecondary} onClick={() => setEdit(false)}>Cancel</button>}
+        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+        {box && <button style={btnSecondary} onClick={() => setEdit(false)}>Cancel</button>}
       </div>
     </div>
   );
@@ -460,27 +423,27 @@ function BoxSpecTab({ product, onUpdated, flash }: { product: Product; onUpdated
 // ─────────────────────────────────────────────────────────────────────────────
 // Blank Spec Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Product; materials: Material[]; onUpdated: (p: Product) => void; flash: (m: string, t?: 'success'|'error') => void }) {
-  const spec = product.blankSpec;
-  const [edit, setEdit] = useState(!spec);
+function BlankSpecTab({ spec, materials, onUpdated, flash }: { spec: MasterSpec; materials: Material[]; onUpdated: (s: MasterSpec) => void; flash: (m: string, t?: 'success'|'error') => void }) {
+  const blankSpec = spec.blankSpec;
+  const [edit, setEdit] = useState(!blankSpec);
   const [saving, setSaving] = useState(false);
 
-  const initForm = () => spec ? {
-    materialId: String(spec.materialId), outsPerSheet: String(spec.outsPerSheet), sheetsPerBox: spec.sheetsPerBox,
-    sheetLengthInches: spec.sheetLengthInches ?? '', sheetWidthInches: spec.sheetWidthInches ?? '',
-    layoutNotes: spec.layoutNotes ?? '', rollWidthRequired: spec.rollWidthRequired ?? '',
-    requiredDieId: String(spec.requiredDieId ?? ''), requiredPlateIds: spec.requiredPlateIds ?? '',
-    materialVariantId: String(spec.materialVariantId ?? ''),
-    blankLengthInches: spec.blankLengthInches, blankWidthInches: spec.blankWidthInches,
-    grainDirection: spec.grainDirection, boardGrade: spec.boardGrade, flute: spec.flute, wallType: spec.wallType,
-    scoreCount: String(spec.scoreCount), scorePositions: spec.scorePositions,
-    slotDepth: spec.slotDepth ?? '', slotWidth: spec.slotWidth ?? '',
-    specialCuts: spec.specialCuts ?? '', trimAmount: spec.trimAmount ?? '', jointType: spec.jointType,
-    printType: spec.printType, printColors: String(spec.printColors), inkTypes: spec.inkTypes ?? '',
-    plateNumbers: spec.plateNumbers ?? '', coating: spec.coating,
-    bundleCount: String(spec.bundleCount ?? ''), tieHigh: String(spec.tieHigh ?? ''),
-    tierWide: String(spec.tierWide ?? ''), palletsPerOrder: String(spec.palletsPerOrder ?? ''),
-    notes: spec.notes ?? '',
+  const initForm = () => blankSpec ? {
+    materialId: String(blankSpec.materialId), outsPerSheet: String(blankSpec.outsPerSheet), sheetsPerBox: blankSpec.sheetsPerBox,
+    sheetLengthInches: blankSpec.sheetLengthInches ?? '', sheetWidthInches: blankSpec.sheetWidthInches ?? '',
+    layoutNotes: blankSpec.layoutNotes ?? '', rollWidthRequired: blankSpec.rollWidthRequired ?? '',
+    requiredDieId: String(blankSpec.requiredDieId ?? ''), requiredPlateIds: blankSpec.requiredPlateIds ?? '',
+    materialVariantId: String(blankSpec.materialVariantId ?? ''),
+    blankLengthInches: blankSpec.blankLengthInches, blankWidthInches: blankSpec.blankWidthInches,
+    grainDirection: blankSpec.grainDirection, boardGrade: blankSpec.boardGrade, flute: blankSpec.flute, wallType: blankSpec.wallType,
+    scoreCount: String(blankSpec.scoreCount), scorePositions: blankSpec.scorePositions,
+    slotDepth: blankSpec.slotDepth ?? '', slotWidth: blankSpec.slotWidth ?? '',
+    specialCuts: blankSpec.specialCuts ?? '', trimAmount: blankSpec.trimAmount ?? '', jointType: blankSpec.jointType,
+    printType: blankSpec.printType, printColors: String(blankSpec.printColors), inkTypes: blankSpec.inkTypes ?? '',
+    plateNumbers: blankSpec.plateNumbers ?? '', coating: blankSpec.coating,
+    bundleCount: String(blankSpec.bundleCount ?? ''), tieHigh: String(blankSpec.tieHigh ?? ''),
+    tierWide: String(blankSpec.tierWide ?? ''), palletsPerOrder: String(blankSpec.palletsPerOrder ?? ''),
+    notes: blankSpec.notes ?? '',
   } : {
     materialId: '', outsPerSheet: '1', sheetsPerBox: '1.0',
     sheetLengthInches: '', sheetWidthInches: '', layoutNotes: '', rollWidthRequired: '',
@@ -526,16 +489,16 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
       if (f.palletsPerOrder)    body.palletsPerOrder    = i(f.palletsPerOrder);
       if (f.notes)              body.notes              = f.notes;
 
-      if (spec) { await api.put(`/protected/products/${product.id}/blank-spec`, body); }
-      else      { await api.post(`/protected/products/${product.id}/blank-spec`, body); }
-      const updated = await api.get<Product>(`/protected/products/${product.id}`);
+      if (blankSpec) { await api.put(`/protected/master-specs/${spec.id}/blank-spec`, body); }
+      else           { await api.post(`/protected/master-specs/${spec.id}/blank-spec`, body); }
+      const updated = await api.get<MasterSpec>(`/protected/master-specs/${spec.id}`);
       onUpdated(updated);
       setEdit(false);
       flash('Blank spec saved.');
     } catch (e: any) { flash(e.message, 'error'); } finally { setSaving(false); }
   }
 
-  if (!edit && spec) return (
+  if (!edit && blankSpec) return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 800 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Manufacturing Recipe</span>
@@ -546,14 +509,14 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
       <div style={{ background: c.accentMuted, border: `1px solid ${c.accentBorder}`, borderRadius: 8, padding: '0.85rem 1rem', marginBottom: '1.25rem', fontSize: '0.82rem' }}>
         <strong style={{ color: c.accent }}>Procurement: </strong>
         <span style={{ color: c.textLabel }}>
-          Material: <strong style={{ color: c.textPrimary }}>{spec.material?.name ?? spec.materialId}</strong>
-          {spec.outsPerSheet > 1 && <> &nbsp;·&nbsp; <strong style={{ color: c.textPrimary }}>{spec.outsPerSheet}-out</strong> (CEIL(qty ÷ {spec.outsPerSheet}) sheets)</>}
-          {parseFloat(spec.sheetsPerBox) > 1 && <> &nbsp;·&nbsp; <strong style={{ color: c.textPrimary }}>{spec.sheetsPerBox}×</strong> sheets per box</>}
+          Material: <strong style={{ color: c.textPrimary }}>{blankSpec.material?.name ?? blankSpec.materialId}</strong>
+          {blankSpec.outsPerSheet > 1 && <> &nbsp;&middot;&nbsp; <strong style={{ color: c.textPrimary }}>{blankSpec.outsPerSheet}-out</strong> (CEIL(qty / {blankSpec.outsPerSheet}) sheets)</>}
+          {parseFloat(blankSpec.sheetsPerBox) > 1 && <> &nbsp;&middot;&nbsp; <strong style={{ color: c.textPrimary }}>{blankSpec.sheetsPerBox}x</strong> sheets per box</>}
         </span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', fontSize: '0.85rem' }}>
-        {[['Blank L × W', `${spec.blankLengthInches}" × ${spec.blankWidthInches}"`], ['Grain', spec.grainDirection], ['Board Grade', spec.boardGrade], ['Flute', spec.flute], ['Wall', spec.wallType], ['Joint', spec.jointType], ['Score Count', String(spec.scoreCount)], ['Print', spec.printType], ['Coating', spec.coating], ['Outs/Sheet', String(spec.outsPerSheet)], ['Sheets/Box', spec.sheetsPerBox], ['Bundle Qty', String(spec.bundleCount ?? '—')], ['Die #', spec.requiredDie?.toolNumber ?? '—'], ['Plates', spec.requiredPlateIds ?? '—']].map(([l,v]) => (
+        {[['Blank L x W', `${blankSpec.blankLengthInches}" x ${blankSpec.blankWidthInches}"`], ['Grain', blankSpec.grainDirection], ['Board Grade', blankSpec.boardGrade], ['Flute', blankSpec.flute], ['Wall', blankSpec.wallType], ['Joint', blankSpec.jointType], ['Score Count', String(blankSpec.scoreCount)], ['Print', blankSpec.printType], ['Coating', blankSpec.coating], ['Outs/Sheet', String(blankSpec.outsPerSheet)], ['Sheets/Box', blankSpec.sheetsPerBox], ['Bundle Qty', String(blankSpec.bundleCount ?? '\u2014')], ['Die #', blankSpec.requiredDie?.toolNumber ?? '\u2014'], ['Plates', blankSpec.requiredPlateIds ?? '\u2014']].map(([l,v]) => (
           <div key={l}><span style={{ color: c.textMuted }}>{l}:</span> <span style={{ marginLeft: 4 }}>{v}</span></div>
         ))}
       </div>
@@ -568,14 +531,14 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
 
   return (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 820 }}>
-      <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>{spec ? 'Edit Blank Spec' : 'Create Blank Spec'}</h3>
+      <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>{blankSpec ? 'Edit Blank Spec' : 'Create Blank Spec'}</h3>
 
       <Section title="Material">
         <FormGrid cols={2}>
           <Field label="Board Material *">
             <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.materialId} onChange={set('materialId')}>
-              <option value="">— Select material —</option>
-              {materials.filter(m => m.unitOfMeasure).map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+              <option value="">&mdash; Select material &mdash;</option>
+              {materials.filter(m => m.unitOfMeasure).map(m => <option key={m.id} value={m.id}>{m.code} &mdash; {m.name}</option>)}
             </select>
           </Field>
         </FormGrid>
@@ -589,7 +552,7 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
           <Field label="Sheet Length (in)"><input style={inputStyle} type="number" step="0.125" value={f.sheetLengthInches as any} onChange={set('sheetLengthInches')} /></Field>
           <Field label="Sheet Width (in)"><input style={inputStyle} type="number" step="0.125" value={f.sheetWidthInches as any} onChange={set('sheetWidthInches')} /></Field>
         </FormGrid>
-        <Field label="Layout Notes"><input style={inputStyle} value={f.layoutNotes} onChange={set('layoutNotes')} placeholder="e.g. 2-out landscape, alternating…" /></Field>
+        <Field label="Layout Notes"><input style={inputStyle} value={f.layoutNotes} onChange={set('layoutNotes')} placeholder="e.g. 2-out landscape, alternating..." /></Field>
       </Section>
 
       <Section title="Tooling">
@@ -610,7 +573,7 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
 
       <Section title="Board Specification">
         <FormGrid cols={3}>
-          <Field label="Board Grade *"><input style={inputStyle} value={f.boardGrade} onChange={set('boardGrade')} placeholder="32 ECT, 200#…" /></Field>
+          <Field label="Board Grade *"><input style={inputStyle} value={f.boardGrade} onChange={set('boardGrade')} placeholder="32 ECT, 200#..." /></Field>
           <Field label="Flute"><Field label="">{sel('flute', SELECT_OPTS.flute)}</Field></Field>
           <Field label="Wall Type"><Field label="">{sel('wallType', SELECT_OPTS.wallType)}</Field></Field>
         </FormGrid>
@@ -640,7 +603,7 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
           <Field label="Print Type"><Field label="">{sel('printType', SELECT_OPTS.printType)}</Field></Field>
           <Field label="Print Colors"><input style={inputStyle} type="number" min="0" max="8" value={f.printColors} onChange={set('printColors')} /></Field>
           <Field label="Coating"><Field label="">{sel('coating', SELECT_OPTS.coating)}</Field></Field>
-          <Field label="Ink Types"><input style={inputStyle} value={f.inkTypes} onChange={set('inkTypes')} placeholder="Blue PMS 286, Black…" /></Field>
+          <Field label="Ink Types"><input style={inputStyle} value={f.inkTypes} onChange={set('inkTypes')} placeholder="Blue PMS 286, Black..." /></Field>
           <Field label="Plate Numbers"><input style={inputStyle} value={f.plateNumbers} onChange={set('plateNumbers')} placeholder="PLT-001,PLT-002" /></Field>
         </FormGrid>
       </Section>
@@ -657,8 +620,8 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
       <Field label="Notes"><textarea style={{ ...inputStyle, height: 64, resize: 'vertical' }} value={f.notes} onChange={set('notes')} /></Field>
 
       <div style={{ display: 'flex', gap: 8 }}>
-        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Blank Spec'}</button>
-        {spec && <button style={btnSecondary} onClick={() => setEdit(false)}>Cancel</button>}
+        <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save Blank Spec'}</button>
+        {blankSpec && <button style={btnSecondary} onClick={() => setEdit(false)}>Cancel</button>}
       </div>
     </div>
   );
@@ -667,7 +630,7 @@ function BlankSpecTab({ product, materials, onUpdated, flash }: { product: Produ
 // ─────────────────────────────────────────────────────────────────────────────
 // Variants Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function VariantsTab({ product, onUpdated, flash }: { product: Product; onUpdated: () => void; flash: (m: string, t?: 'success'|'error') => void }) {
+function VariantsTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: () => void; flash: (m: string, t?: 'success'|'error') => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [f, setF]             = useState({ sku: '', variantDescription: '', width: '', length: '', thickness: '', bundleQty: '', caseQty: '', listPrice: '' });
   const [saving, setSaving]   = useState(false);
@@ -683,7 +646,7 @@ function VariantsTab({ product, onUpdated, flash }: { product: Product; onUpdate
       if (f.bundleQty)body.bundleQty= parseInt(f.bundleQty);
       if (f.caseQty)  body.caseQty  = parseInt(f.caseQty);
       if (f.listPrice)body.listPrice = parseFloat(f.listPrice);
-      await api.post(`/protected/products/${product.id}/variants`, body);
+      await api.post(`/protected/master-specs/${spec.id}/variants`, body);
       onUpdated();
       setShowAdd(false);
       setF({ sku: '', variantDescription: '', width: '', length: '', thickness: '', bundleQty: '', caseQty: '', listPrice: '' });
@@ -694,7 +657,7 @@ function VariantsTab({ product, onUpdated, flash }: { product: Product; onUpdate
   async function deactivate(vid: number) {
     if (!confirm('Deactivate this variant?')) return;
     try {
-      await api.delete(`/protected/products/${product.id}/variants/${vid}`);
+      await api.delete(`/protected/master-specs/${spec.id}/variants/${vid}`);
       onUpdated();
       flash('Variant deactivated.');
     } catch (e: any) { flash(e.message, 'error'); }
@@ -705,7 +668,7 @@ function VariantsTab({ product, onUpdated, flash }: { product: Product; onUpdate
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{product.variants.length} variant{product.variants.length !== 1 ? 's' : ''}</span>
+        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{spec.variants.length} variant{spec.variants.length !== 1 ? 's' : ''}</span>
         <button style={btnPrimary} onClick={() => setShowAdd(s => !s)}>+ Add Variant</button>
       </div>
 
@@ -722,32 +685,32 @@ function VariantsTab({ product, onUpdated, flash }: { product: Product; onUpdate
             <Field label="List Price"><input style={inputStyle} type="number" step="0.0001" value={f.listPrice} onChange={set('listPrice')} /></Field>
           </FormGrid>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button style={btnPrimary} onClick={addVariant} disabled={saving}>{saving ? 'Saving…' : 'Add'}</button>
+            <button style={btnPrimary} onClick={addVariant} disabled={saving}>{saving ? 'Saving...' : 'Add'}</button>
             <button style={btnSecondary} onClick={() => setShowAdd(false)}>Cancel</button>
           </div>
         </div>
       )}
 
-      {product.variants.length === 0 ? (
+      {spec.variants.length === 0 ? (
         <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No variants yet.</div>
       ) : (
         <div style={{ ...cardStyle, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
-                {['SKU','Description','W × L','Bundle Qty','List Price','Status',''].map(h => (
+                {['SKU','Description','W x L','Bundle Qty','List Price','Status',''].map(h => (
                   <th key={h} style={{ padding: '0.65rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {product.variants.map(v => (
+              {spec.variants.map(v => (
                 <tr key={v.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
                   <td style={{ padding: '0.65rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.accent }}>{v.sku}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.85rem' }}>{v.variantDescription ?? '—'}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{v.width && v.length ? `${v.width}" × ${v.length}"` : '—'}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{v.bundleQty ?? '—'}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem' }}>{v.listPrice ? `$${Number(v.listPrice).toFixed(2)}` : '—'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.85rem' }}>{v.variantDescription ?? '\u2014'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{v.width && v.length ? `${v.width}" x ${v.length}"` : '\u2014'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{v.bundleQty ?? '\u2014'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem' }}>{v.listPrice ? `$${Number(v.listPrice).toFixed(2)}` : '\u2014'}</td>
                   <td style={{ padding: '0.65rem 1rem' }}>
                     <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.15rem 0.45rem', borderRadius: 4, background: v.isActive ? 'rgba(34,197,94,0.1)' : 'rgba(100,116,139,0.1)', color: v.isActive ? '#22c55e' : '#64748b' }}>{v.isActive ? 'Active' : 'Off'}</span>
                   </td>
@@ -767,7 +730,7 @@ function VariantsTab({ product, onUpdated, flash }: { product: Product; onUpdate
 // ─────────────────────────────────────────────────────────────────────────────
 // Specs Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: () => void; flash: (m: string, t?: 'success'|'error') => void }) {
+function SpecsTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: () => void; flash: (m: string, t?: 'success'|'error') => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [f, setF]             = useState({ specKey: '', specValue: '', specUnit: '', sortOrder: '' });
   const [saving, setSaving]   = useState(false);
@@ -778,7 +741,7 @@ function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: 
       const body: Record<string, unknown> = { specKey: f.specKey, specValue: f.specValue };
       if (f.specUnit)  body.specUnit  = f.specUnit;
       if (f.sortOrder) body.sortOrder = parseInt(f.sortOrder);
-      await api.post(`/protected/products/${product.id}/specs`, body);
+      await api.post(`/protected/master-specs/${spec.id}/specs`, body);
       onUpdated();
       setShowAdd(false);
       setF({ specKey: '', specValue: '', specUnit: '', sortOrder: '' });
@@ -788,7 +751,7 @@ function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: 
 
   async function deleteSpec(sid: number) {
     try {
-      await api.delete(`/protected/products/${product.id}/specs/${sid}`);
+      await api.delete(`/protected/master-specs/${spec.id}/specs/${sid}`);
       onUpdated();
       flash('Spec removed.');
     } catch (e: any) { flash(e.message, 'error'); }
@@ -799,7 +762,7 @@ function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{product.specs.length} spec{product.specs.length !== 1 ? 's' : ''}</span>
+        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{spec.specs.length} spec{spec.specs.length !== 1 ? 's' : ''}</span>
         <button style={btnPrimary} onClick={() => setShowAdd(s => !s)}>+ Add Spec</button>
       </div>
       {showAdd && (
@@ -811,12 +774,12 @@ function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: 
             <Field label="Sort Order"><input style={inputStyle} type="number" value={f.sortOrder} onChange={set('sortOrder')} /></Field>
           </FormGrid>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button style={btnPrimary} onClick={addSpec} disabled={saving}>{saving ? '…' : 'Add'}</button>
+            <button style={btnPrimary} onClick={addSpec} disabled={saving}>{saving ? '...' : 'Add'}</button>
             <button style={btnSecondary} onClick={() => setShowAdd(false)}>Cancel</button>
           </div>
         </div>
       )}
-      {product.specs.length === 0 ? (
+      {spec.specs.length === 0 ? (
         <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No specs yet.</div>
       ) : (
         <div style={{ ...cardStyle, overflow: 'hidden' }}>
@@ -829,11 +792,11 @@ function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: 
               </tr>
             </thead>
             <tbody>
-              {product.specs.map(s => (
+              {spec.specs.map(s => (
                 <tr key={s.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
                   <td style={{ padding: '0.65rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.accent }}>{s.specKey}</td>
                   <td style={{ padding: '0.65rem 1rem', fontSize: '0.875rem' }}>{s.specValue}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{s.specUnit ?? '—'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{s.specUnit ?? '\u2014'}</td>
                   <td style={{ padding: '0.65rem 1rem' }}>
                     <button style={{ ...btnDanger, padding: '0.2rem 0.6rem', fontSize: '0.75rem' }} onClick={() => deleteSpec(s.id)}>Remove</button>
                   </td>
@@ -850,7 +813,7 @@ function SpecsTab({ product, onUpdated, flash }: { product: Product; onUpdated: 
 // ─────────────────────────────────────────────────────────────────────────────
 // BOM Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function BOMTab({ product, materials, onUpdated, flash }: { product: Product; materials: Material[]; onUpdated: () => void; flash: (m: string, t?: 'success'|'error') => void }) {
+function BOMTab({ spec, materials, onUpdated, flash }: { spec: MasterSpec; materials: Material[]; onUpdated: () => void; flash: (m: string, t?: 'success'|'error') => void }) {
   const [showAdd, setShowAdd] = useState(false);
   const [f, setF]             = useState({ materialId: '', quantityPer: '', unitOfMeasure: '' });
   const [saving, setSaving]   = useState(false);
@@ -858,7 +821,7 @@ function BOMTab({ product, materials, onUpdated, flash }: { product: Product; ma
   async function addLine() {
     setSaving(true);
     try {
-      await api.post(`/protected/products/${product.id}/bom`, { materialId: parseInt(f.materialId), quantityPer: parseFloat(f.quantityPer), unitOfMeasure: f.unitOfMeasure });
+      await api.post(`/protected/master-specs/${spec.id}/bom`, { materialId: parseInt(f.materialId), quantityPer: parseFloat(f.quantityPer), unitOfMeasure: f.unitOfMeasure });
       onUpdated();
       setShowAdd(false);
       setF({ materialId: '', quantityPer: '', unitOfMeasure: '' });
@@ -868,7 +831,7 @@ function BOMTab({ product, materials, onUpdated, flash }: { product: Product; ma
 
   async function removeLine(bid: number) {
     try {
-      await api.delete(`/protected/products/${product.id}/bom/${bid}`);
+      await api.delete(`/protected/master-specs/${spec.id}/bom/${bid}`);
       onUpdated();
       flash('BOM line removed.');
     } catch (e: any) { flash(e.message, 'error'); }
@@ -877,7 +840,7 @@ function BOMTab({ product, materials, onUpdated, flash }: { product: Product; ma
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{product.bomLines.length} material{product.bomLines.length !== 1 ? 's' : ''} in BOM</span>
+        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{spec.bomLines.length} material{spec.bomLines.length !== 1 ? 's' : ''} in BOM</span>
         <button style={btnPrimary} onClick={() => setShowAdd(s => !s)}>+ Add Material</button>
       </div>
       {showAdd && (
@@ -885,20 +848,20 @@ function BOMTab({ product, materials, onUpdated, flash }: { product: Product; ma
           <FormGrid cols={3}>
             <Field label="Material *">
               <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.materialId} onChange={e => setF(p => ({ ...p, materialId: e.target.value }))}>
-                <option value="">— Select —</option>
-                {materials.map(m => <option key={m.id} value={m.id}>{m.code} — {m.name}</option>)}
+                <option value="">&mdash; Select &mdash;</option>
+                {materials.map(m => <option key={m.id} value={m.id}>{m.code} &mdash; {m.name}</option>)}
               </select>
             </Field>
             <Field label="Qty per Unit *"><input style={inputStyle} type="number" step="0.000001" value={f.quantityPer} onChange={e => setF(p => ({ ...p, quantityPer: e.target.value }))} /></Field>
-            <Field label="Unit of Measure *"><input style={inputStyle} value={f.unitOfMeasure} onChange={e => setF(p => ({ ...p, unitOfMeasure: e.target.value }))} placeholder="oz, fl oz, sqft…" /></Field>
+            <Field label="Unit of Measure *"><input style={inputStyle} value={f.unitOfMeasure} onChange={e => setF(p => ({ ...p, unitOfMeasure: e.target.value }))} placeholder="oz, fl oz, sqft..." /></Field>
           </FormGrid>
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button style={btnPrimary} onClick={addLine} disabled={saving}>{saving ? '…' : 'Add'}</button>
+            <button style={btnPrimary} onClick={addLine} disabled={saving}>{saving ? '...' : 'Add'}</button>
             <button style={btnSecondary} onClick={() => setShowAdd(false)}>Cancel</button>
           </div>
         </div>
       )}
-      {product.bomLines.length === 0 ? (
+      {spec.bomLines.length === 0 ? (
         <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No BOM lines. Note: board/sheet is captured in the Blank Spec.</div>
       ) : (
         <div style={{ ...cardStyle, overflow: 'hidden' }}>
@@ -911,7 +874,7 @@ function BOMTab({ product, materials, onUpdated, flash }: { product: Product; ma
               </tr>
             </thead>
             <tbody>
-              {product.bomLines.map(b => (
+              {spec.bomLines.map(b => (
                 <tr key={b.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
                   <td style={{ padding: '0.65rem 1rem', fontSize: '0.875rem' }}>{b.material.name}</td>
                   <td style={{ padding: '0.65rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.textLabel }}>{b.material.code}</td>
@@ -931,10 +894,56 @@ function BOMTab({ product, materials, onUpdated, flash }: { product: Product; ma
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Customer Items Tab (read-only)
+// ─────────────────────────────────────────────────────────────────────────────
+function CustomerItemsTab({ spec }: { spec: MasterSpec }) {
+  const navigate = useNavigate();
+  const rows = spec.customerItems ?? [];
+
+  return (
+    <div style={{ maxWidth: 700 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{rows.length} customer item{rows.length !== 1 ? 's' : ''} reference this master spec</span>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items linked to this master spec.</div>
+      ) : (
+        <div style={{ ...cardStyle, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
+                {['Item Code', 'Description', 'Customer'].map(h => (
+                  <th key={h} style={{ padding: '0.65rem 1rem', textAlign: 'left', fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(ci => (
+                <tr
+                  key={ci.id}
+                  onClick={() => navigate(`/customer-items/${ci.id}`)}
+                  style={{ borderBottom: `1px solid ${c.divider}`, cursor: 'pointer', transition: 'background 0.1s' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <td style={{ padding: '0.65rem 1rem', fontFamily: 'monospace', fontSize: '0.82rem', color: c.accent, fontWeight: 600 }}>{ci.itemCode}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.875rem', color: c.textPrimary }}>{ci.description ?? '\u2014'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{ci.customer?.name ?? '\u2014'} {ci.customer?.code ? `(${ci.customer.code})` : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Inventory Tab
 // ─────────────────────────────────────────────────────────────────────────────
-function InventoryTab({ product }: { product: Product }) {
-  const rows = product.finishedGoodsInventory;
+function InventoryTab({ spec }: { spec: MasterSpec }) {
+  const rows = spec.finishedGoodsInventory;
   const total = rows.reduce((s, r) => s + Number(r.quantity), 0);
 
   return (
@@ -959,9 +968,9 @@ function InventoryTab({ product }: { product: Product }) {
               {rows.map(r => (
                 <tr key={r.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
                   <td style={{ padding: '0.65rem 1rem', fontSize: '0.875rem' }}>{r.location.name}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.variant?.sku ?? '—'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.variant?.sku ?? '\u2014'}</td>
                   <td style={{ padding: '0.65rem 1rem', fontSize: '0.875rem', fontWeight: 600 }}>{Number(r.quantity).toLocaleString()}</td>
-                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.avgCost ? `$${Number(r.avgCost).toFixed(4)}` : '—'}</td>
+                  <td style={{ padding: '0.65rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.avgCost ? `$${Number(r.avgCost).toFixed(4)}` : '\u2014'}</td>
                 </tr>
               ))}
             </tbody>

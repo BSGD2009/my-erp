@@ -14,7 +14,8 @@ interface Customer {
   city?: string; state?: string; creditHold: boolean; taxExempt: boolean; isActive: boolean;
   paymentTerm?: { id: number; termName: string };
   defaultSalesRep?: { id: number; name: string };
-  _count: { contacts: number; orders: number; shipToAddresses: number };
+  party?: { contacts: Array<{ id: number; name: string; phone?: string; email?: string }> };
+  _count: { orders: number };
 }
 
 const EMPTY_FORM = {
