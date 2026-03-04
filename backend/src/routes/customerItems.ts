@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { FulfillmentPath } from '@prisma/client';
+import { FulfillmentPath, PrintPlateStatus } from '@prisma/client';
 import prisma from '../prisma';
 
 const router = Router();
 
 const VALID_FULFILLMENT_PATHS = Object.values(FulfillmentPath);
+const VALID_PRINT_PLATE_STATUSES = Object.values(PrintPlateStatus);
 
 // Auto-generate code from name: first 4 letters + 2-digit number
 async function generateCode(name: string): Promise<string> {
@@ -82,7 +83,8 @@ router.get('/:id', async (req, res) => {
 // ── POST /api/protected/customer-items ──────────────────────────────────────
 router.post('/', async (req, res) => {
   const { code, name, description, customerId, masterSpecId, variantId,
-          listPrice, fulfillmentPath } = req.body as Record<string, unknown>;
+          listPrice, fulfillmentPath, partNumber, printPlateStatus,
+          printPlateExpectedDate, printPlateRequired } = req.body as Record<string, unknown>;
 
   if (!String(name       ?? '').trim()) { res.status(400).json({ error: 'name is required' });       return; }
   if (customerId == null)               { res.status(400).json({ error: 'customerId is required' }); return; }
@@ -97,6 +99,9 @@ router.post('/', async (req, res) => {
 
   if (fulfillmentPath !== undefined && !VALID_FULFILLMENT_PATHS.includes(fulfillmentPath as FulfillmentPath)) {
     res.status(400).json({ error: `fulfillmentPath must be one of: ${VALID_FULFILLMENT_PATHS.join(', ')}` }); return;
+  }
+  if (printPlateStatus !== undefined && !VALID_PRINT_PLATE_STATUSES.includes(printPlateStatus as PrintPlateStatus)) {
+    res.status(400).json({ error: `printPlateStatus must be one of: ${VALID_PRINT_PLATE_STATUSES.join(', ')}` }); return;
   }
 
   const finalCode = code && String(code).trim()
@@ -113,7 +118,11 @@ router.post('/', async (req, res) => {
         masterSpecId:    masterSpecId    != null ? Number(masterSpecId)            : null,
         variantId:       Number(variantId),
         listPrice:       listPrice       != null ? (listPrice as string | number) : null,
-        fulfillmentPath: (fulfillmentPath as FulfillmentPath | undefined) ?? 'MANUFACTURE',
+        fulfillmentPath:     (fulfillmentPath as FulfillmentPath | undefined) ?? 'MANUFACTURE',
+        partNumber:             partNumber            ? String(partNumber).trim()           : null,
+        printPlateStatus:       (printPlateStatus as PrintPlateStatus | undefined) ?? 'NO_PRINT_NEEDED',
+        printPlateExpectedDate: printPlateExpectedDate ? new Date(String(printPlateExpectedDate)) : null,
+        printPlateRequired:     printPlateRequired     ? Boolean(printPlateRequired)          : false,
       },
       include: {
         customer:   { select: { id: true, code: true, name: true } },
@@ -135,10 +144,14 @@ router.put('/:id', async (req, res) => {
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { code, name, description, customerId, masterSpecId, variantId,
-          listPrice, fulfillmentPath, isActive } = req.body as Record<string, unknown>;
+          listPrice, fulfillmentPath, isActive, partNumber, printPlateStatus,
+          printPlateExpectedDate, printPlateRequired } = req.body as Record<string, unknown>;
 
   if (fulfillmentPath !== undefined && !VALID_FULFILLMENT_PATHS.includes(fulfillmentPath as FulfillmentPath)) {
     res.status(400).json({ error: `fulfillmentPath must be one of: ${VALID_FULFILLMENT_PATHS.join(', ')}` }); return;
+  }
+  if (printPlateStatus !== undefined && !VALID_PRINT_PLATE_STATUSES.includes(printPlateStatus as PrintPlateStatus)) {
+    res.status(400).json({ error: `printPlateStatus must be one of: ${VALID_PRINT_PLATE_STATUSES.join(', ')}` }); return;
   }
 
   // Validate variant-masterSpec consistency if changing either
@@ -162,6 +175,10 @@ router.put('/:id', async (req, res) => {
   if (listPrice       !== undefined) d.listPrice       = listPrice       != null ? (listPrice as string | number) : null;
   if (fulfillmentPath !== undefined) d.fulfillmentPath = fulfillmentPath as FulfillmentPath;
   if (isActive        !== undefined) d.isActive        = Boolean(isActive);
+  if (partNumber             !== undefined) d.partNumber             = partNumber ? String(partNumber).trim() : null;
+  if (printPlateStatus       !== undefined) d.printPlateStatus       = printPlateStatus as string;
+  if (printPlateExpectedDate !== undefined) d.printPlateExpectedDate = printPlateExpectedDate ? new Date(String(printPlateExpectedDate)) : null;
+  if (printPlateRequired     !== undefined) d.printPlateRequired     = Boolean(printPlateRequired);
 
   try {
     const customerItem = await prisma.customerItem.update({

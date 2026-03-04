@@ -2,12 +2,21 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Drawer } from '../components/Drawer';
+import { FractionInput } from '../components/FractionInput';
+import { decimalToFraction } from '../utils/fractions';
 import { api } from '../api/client';
 import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle } from '../theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+interface LocationOverride {
+  id: number; locationId: number;
+  sheetLengthOverride?: string; sheetWidthOverride?: string;
+  trimNotes?: string; isActive: boolean;
+  location: { id: number; name: string };
+}
+
 interface Variant {
   id: number; sku: string; variantDescription?: string;
   boardGradeId?: number; flute?: string; caliper?: string;
@@ -19,6 +28,7 @@ interface Variant {
   blankSpec?: BlankSpec;
   bomLines: BOMLine[];
   customerItems: CustomerItem[];
+  locationOverrides?: LocationOverride[];
 }
 
 interface BlankSpec {
@@ -111,6 +121,7 @@ export function VariantRecordPage() {
   const [activeTab, setTab]       = useState('Blank Spec');
   const [msg, setMsg]             = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [drawerOpen, setDrawer]   = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
 
   // Supporting data
   const [materials, setMaterials]   = useState<Material[]>([]);
@@ -141,6 +152,21 @@ export function VariantRecordPage() {
   function flash(text: string, type: 'success' | 'error' = 'success') {
     setMsg({ text, type });
     if (type === 'success') setTimeout(() => setMsg(null), 3500);
+  }
+
+  // ── Duplicate variant ──
+  async function handleDuplicate() {
+    if (!variant) return;
+    setDuplicating(true);
+    try {
+      const newVariant = await api.post<Variant>(`/protected/master-specs/${id}/variants/${variant.id}/duplicate`, {});
+      navigate(`/master-specs/${id}/variants/${newVariant.id}`);
+    } catch (e: unknown) {
+      const err = e as Error;
+      flash(err.message, 'error');
+    } finally {
+      setDuplicating(false);
+    }
   }
 
   const tabs = ['Blank Spec', 'BOM', 'Customer Items'];
@@ -195,7 +221,10 @@ export function VariantRecordPage() {
               <div style={{ fontSize: '0.82rem', color: c.textMuted, marginTop: 4 }}>{variant.variantDescription}</div>
             )}
           </div>
-          <button style={btnSecondary} onClick={() => setDrawer(true)}>Edit</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={btnSecondary} onClick={handleDuplicate} disabled={duplicating}>{duplicating ? 'Duplicating...' : 'Duplicate'}</button>
+            <button style={btnSecondary} onClick={() => setDrawer(true)}>Edit</button>
+          </div>
         </div>
       )}
 
@@ -253,6 +282,10 @@ function EditDrawer({ variant, boardGrades, open, onClose, onUpdated, flash, spe
     listPrice: variant.listPrice ?? '',
   });
   const [saving, setSaving] = useState(false);
+  const [caliperOverride, setCaliperOverride] = useState(false);
+
+  // Determine if caliper matches grade
+  const caliperFromGrade = !!(variant.boardGrade && variant.caliper === variant.boardGrade.nominalCaliper);
 
   // Reset form when variant changes or drawer opens
   useEffect(() => {
@@ -267,6 +300,7 @@ function EditDrawer({ variant, boardGrades, open, onClose, onUpdated, flash, spe
         length: variant.length ?? '',
         listPrice: variant.listPrice ?? '',
       });
+      setCaliperOverride(false);
     }
   }, [open, variant]);
 
@@ -330,7 +364,24 @@ function EditDrawer({ variant, boardGrades, open, onClose, onUpdated, flash, spe
         </Field>
 
         <Field label="Caliper (in)">
-          <input style={inputStyle} value={f.caliper} onChange={set('caliper')} placeholder="Auto from grade" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {caliperFromGrade && !caliperOverride ? (
+              <>
+                <input style={{ ...inputStyle, flex: 1, opacity: 0.8 }} value={f.caliper} readOnly />
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, padding: '0.15rem 0.4rem', borderRadius: 4, background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.25)', whiteSpace: 'nowrap' }}>from grade</span>
+                <button
+                  type="button"
+                  onClick={() => setCaliperOverride(true)}
+                  style={{ background: 'none', border: 'none', color: c.accent, fontSize: '0.72rem', cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}
+                >Override</button>
+              </>
+            ) : (
+              <>
+                <input style={{ ...inputStyle, flex: 1 }} value={f.caliper} onChange={set('caliper')} placeholder="Auto from grade" />
+                <span style={{ fontSize: '0.65rem', fontWeight: 600, padding: '0.15rem 0.4rem', borderRadius: 4, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)', whiteSpace: 'nowrap' }}>manual</span>
+              </>
+            )}
+          </div>
         </Field>
       </FormGrid>
 
@@ -358,6 +409,26 @@ function EditDrawer({ variant, boardGrades, open, onClose, onUpdated, flash, spe
 // ─────────────────────────────────────────────────────────────────────────────
 // Blank Spec Tab
 // ─────────────────────────────────────────────────────────────────────────────
+interface ScoreEntry { position: number; measurement: string; auto: boolean }
+
+function parseScoresToArray(json: string): ScoreEntry[] {
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr.map((s: { position: number; measurement: number }, i: number) => ({
+      position: s.position ?? (i + 1),
+      measurement: String(s.measurement ?? 0),
+      auto: false,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function scoresToJson(scores: ScoreEntry[]): string {
+  return JSON.stringify(scores.map(s => ({ position: s.position, measurement: Number(s.measurement) || 0 })));
+}
+
 function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
   variant: Variant; materials: Material[]; specId: string;
   onUpdated: (v: Variant) => void; flash: (m: string, t?: 'success' | 'error') => void;
@@ -365,6 +436,16 @@ function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
   const blankSpec = variant.blankSpec;
   const [edit, setEdit] = useState(!blankSpec);
   const [saving, setSaving] = useState(false);
+
+  // Location overrides state (for view mode)
+  const [locations, setLocations] = useState<{id: number; name: string}[]>([]);
+  const [overrideForm, setOverrideForm] = useState({ locationId: '', sheetLength: '', sheetWidth: '', trimNotes: '' });
+  const [addingOverride, setAddingOverride] = useState(false);
+
+  // Load locations once
+  useEffect(() => {
+    api.get<{data: {id: number; name: string}[]}>('/protected/locations?limit=200').then(r => setLocations(r.data)).catch(() => {});
+  }, []);
 
   const initForm = () => blankSpec ? {
     materialId: String(blankSpec.materialId), outsPerSheet: String(blankSpec.outsPerSheet), sheetsPerBox: blankSpec.sheetsPerBox,
@@ -394,7 +475,122 @@ function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
   };
 
   const [f, setF] = useState(initForm);
+
+  // Score positions as structured array
+  const [scores, setScores] = useState<ScoreEntry[]>(() => parseScoresToArray(f.scorePositions));
+  // Box dimensions for auto-calc (loaded from master spec)
+  const [boxDims, setBoxDims] = useState<{ L: number; W: number; H: number } | null>(null);
+  // Multi-sheet toggle
+  const [multiSheet, setMultiSheet] = useState(() => parseFloat(blankSpec?.sheetsPerBox ?? '1') > 1);
+
+  // Load box dims from master spec for auto-calc
+  useEffect(() => {
+    api.get<{ boxSpec?: { lengthInches: string; widthInches: string; heightInches: string } }>(`/protected/master-specs/${specId}`)
+      .then(ms => {
+        if (ms.boxSpec) {
+          setBoxDims({
+            L: parseFloat(ms.boxSpec.lengthInches) || 0,
+            W: parseFloat(ms.boxSpec.widthInches) || 0,
+            H: parseFloat(ms.boxSpec.heightInches) || 0,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [specId]);
+
+  // Sync scores -> f.scorePositions and f.scoreCount whenever scores change
+  useEffect(() => {
+    setF(p => ({
+      ...p,
+      scorePositions: scoresToJson(scores),
+      scoreCount: String(scores.length),
+    }));
+  }, [scores]);
+
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF(p => ({ ...p, [k]: e.target.value }));
+
+  // Score auto-calc (RSC standard)
+  function autoCalcScores() {
+    if (!boxDims) {
+      flash('No box dimensions found on master spec. Cannot auto-calculate.', 'error');
+      return;
+    }
+    const { L, W, H } = boxDims;
+    const cal = parseFloat(variant.caliper ?? '') || 0.1875; // default 3/16"
+    const s1 = W + cal;
+    const s2 = W + L + 2 * cal;
+    const s3 = 2 * W + L + 3 * cal;
+    const s4 = 2 * W + 2 * L + 4 * cal;
+    const autoSlotDepth = H / 2 + 0.375;
+
+    const newScores: ScoreEntry[] = [
+      { position: 1, measurement: String(Math.round(s1 * 1000000) / 1000000), auto: true },
+      { position: 2, measurement: String(Math.round(s2 * 1000000) / 1000000), auto: true },
+      { position: 3, measurement: String(Math.round(s3 * 1000000) / 1000000), auto: true },
+      { position: 4, measurement: String(Math.round(s4 * 1000000) / 1000000), auto: true },
+    ];
+    setScores(newScores);
+    setF(p => ({ ...p, slotDepth: String(Math.round(autoSlotDepth * 1000000) / 1000000) }));
+  }
+
+  // Handle score measurement change
+  function updateScoreMeasurement(idx: number, val: string) {
+    setScores(prev => prev.map((s, i) => i === idx ? { ...s, measurement: val, auto: false } : s));
+  }
+
+  // Add/remove score rows
+  function addScoreRow() {
+    setScores(prev => [...prev, { position: prev.length + 1, measurement: '', auto: false }]);
+  }
+  function removeScoreRow(idx: number) {
+    setScores(prev => prev.filter((_, i) => i !== idx).map((s, i) => ({ ...s, position: i + 1 })));
+  }
+
+  // Multi-sheet toggle handler
+  function handleMultiSheetToggle(checked: boolean) {
+    setMultiSheet(checked);
+    if (checked) {
+      // ON: show sheetsPerBox, hide outsPerSheet (set to 1)
+      setF(p => ({ ...p, outsPerSheet: '1' }));
+    } else {
+      // OFF: show outsPerSheet, hide sheetsPerBox (set to 1.0)
+      setF(p => ({ ...p, sheetsPerBox: '1.0' }));
+    }
+  }
+
+  // Location override handlers
+  async function addOverride() {
+    if (!overrideForm.locationId) return;
+    setAddingOverride(true);
+    try {
+      const body: Record<string, unknown> = { locationId: parseInt(overrideForm.locationId) };
+      if (overrideForm.sheetLength) body.sheetLengthOverride = parseFloat(overrideForm.sheetLength);
+      if (overrideForm.sheetWidth) body.sheetWidthOverride = parseFloat(overrideForm.sheetWidth);
+      if (overrideForm.trimNotes) body.trimNotes = overrideForm.trimNotes;
+      await api.post(`/protected/master-specs/${specId}/variants/${variant.id}/location-overrides`, body);
+      const updated = await api.get<Variant>(`/protected/master-specs/${specId}/variants/${variant.id}`);
+      onUpdated(updated);
+      setOverrideForm({ locationId: '', sheetLength: '', sheetWidth: '', trimNotes: '' });
+      flash('Location override added.');
+    } catch (e: unknown) {
+      const err = e as Error;
+      flash(err.message, 'error');
+    } finally {
+      setAddingOverride(false);
+    }
+  }
+
+  async function removeOverride(ovId: number) {
+    try {
+      await api.delete(`/protected/master-specs/${specId}/variants/${variant.id}/location-overrides/${ovId}`);
+      const updated = await api.get<Variant>(`/protected/master-specs/${specId}/variants/${variant.id}`);
+      onUpdated(updated);
+      flash('Location override removed.');
+    } catch (e: unknown) {
+      const err = e as Error;
+      flash(err.message, 'error');
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -446,41 +642,110 @@ function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
 
   // ── View mode ──
   if (!edit && blankSpec) return (
-    <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 800 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-        <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Manufacturing Recipe</span>
-        <button style={btnSecondary} onClick={() => { setF(initForm()); setEdit(true); }}>Edit</button>
+    <div>
+      <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 800 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Manufacturing Recipe</span>
+          <button style={btnSecondary} onClick={() => { setF(initForm()); setScores(parseScoresToArray(blankSpec.scorePositions)); setMultiSheet(parseFloat(blankSpec.sheetsPerBox) > 1); setEdit(true); }}>Edit</button>
+        </div>
+
+        {/* Procurement summary */}
+        <div style={{ background: c.accentMuted, border: `1px solid ${c.accentBorder}`, borderRadius: 8, padding: '0.85rem 1rem', marginBottom: '1.25rem', fontSize: '0.82rem' }}>
+          <strong style={{ color: c.accent }}>Procurement: </strong>
+          <span style={{ color: c.textLabel }}>
+            Material: <strong style={{ color: c.textPrimary }}>{blankSpec.material?.name ?? blankSpec.materialId}</strong>
+            {blankSpec.outsPerSheet > 1 && <> &nbsp;&middot;&nbsp; <strong style={{ color: c.textPrimary }}>{blankSpec.outsPerSheet}-out</strong> (CEIL(qty / {blankSpec.outsPerSheet}) sheets)</>}
+            {parseFloat(blankSpec.sheetsPerBox) > 1 && <> &nbsp;&middot;&nbsp; <strong style={{ color: c.textPrimary }}>{blankSpec.sheetsPerBox}x</strong> sheets per box</>}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', fontSize: '0.85rem' }}>
+          {([
+            ['Blank L x W', `${decimalToFraction(Number(blankSpec.blankLengthInches))}" x ${decimalToFraction(Number(blankSpec.blankWidthInches))}"`],
+            ['Grain', blankSpec.grainDirection],
+            ['Board Grade', blankSpec.boardGrade],
+            ['Flute', blankSpec.flute],
+            ['Wall', blankSpec.wallType],
+            ['Joint', blankSpec.jointType],
+            ['Score Count', String(blankSpec.scoreCount)],
+            ['Slot Depth', blankSpec.slotDepth ? `${decimalToFraction(Number(blankSpec.slotDepth))}"` : '\u2014'],
+            ['Slot Width', blankSpec.slotWidth ? `${decimalToFraction(Number(blankSpec.slotWidth))}"` : '\u2014'],
+            ['Sheet L x W', (blankSpec.sheetLengthInches && blankSpec.sheetWidthInches) ? `${decimalToFraction(Number(blankSpec.sheetLengthInches))}" x ${decimalToFraction(Number(blankSpec.sheetWidthInches))}"` : '\u2014'],
+            ['Print', blankSpec.printType],
+            ['Coating', blankSpec.coating],
+            ['Outs/Sheet', String(blankSpec.outsPerSheet)],
+            ['Sheets/Box', blankSpec.sheetsPerBox],
+            ['Bundle Qty', String(blankSpec.bundleCount ?? '\u2014')],
+            ['Die #', blankSpec.requiredDie?.toolNumber ?? '\u2014'],
+            ['Plates', blankSpec.requiredPlateIds ?? '\u2014'],
+          ] as [string, string][]).map(([l, v]) => (
+            <div key={l}><span style={{ color: c.textMuted }}>{l}:</span> <span style={{ marginLeft: 4 }}>{v}</span></div>
+          ))}
+        </div>
       </div>
 
-      {/* Procurement summary */}
-      <div style={{ background: c.accentMuted, border: `1px solid ${c.accentBorder}`, borderRadius: 8, padding: '0.85rem 1rem', marginBottom: '1.25rem', fontSize: '0.82rem' }}>
-        <strong style={{ color: c.accent }}>Procurement: </strong>
-        <span style={{ color: c.textLabel }}>
-          Material: <strong style={{ color: c.textPrimary }}>{blankSpec.material?.name ?? blankSpec.materialId}</strong>
-          {blankSpec.outsPerSheet > 1 && <> &nbsp;&middot;&nbsp; <strong style={{ color: c.textPrimary }}>{blankSpec.outsPerSheet}-out</strong> (CEIL(qty / {blankSpec.outsPerSheet}) sheets)</>}
-          {parseFloat(blankSpec.sheetsPerBox) > 1 && <> &nbsp;&middot;&nbsp; <strong style={{ color: c.textPrimary }}>{blankSpec.sheetsPerBox}x</strong> sheets per box</>}
-        </span>
-      </div>
+      {/* ── Location Overrides section (view mode) ── */}
+      <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 800, marginTop: '1.25rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 600, color: c.textLabel }}>Location Overrides</span>
+        </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', fontSize: '0.85rem' }}>
-        {([
-          ['Blank L x W', `${blankSpec.blankLengthInches}" x ${blankSpec.blankWidthInches}"`],
-          ['Grain', blankSpec.grainDirection],
-          ['Board Grade', blankSpec.boardGrade],
-          ['Flute', blankSpec.flute],
-          ['Wall', blankSpec.wallType],
-          ['Joint', blankSpec.jointType],
-          ['Score Count', String(blankSpec.scoreCount)],
-          ['Print', blankSpec.printType],
-          ['Coating', blankSpec.coating],
-          ['Outs/Sheet', String(blankSpec.outsPerSheet)],
-          ['Sheets/Box', blankSpec.sheetsPerBox],
-          ['Bundle Qty', String(blankSpec.bundleCount ?? '\u2014')],
-          ['Die #', blankSpec.requiredDie?.toolNumber ?? '\u2014'],
-          ['Plates', blankSpec.requiredPlateIds ?? '\u2014'],
-        ] as [string, string][]).map(([l, v]) => (
-          <div key={l}><span style={{ color: c.textMuted }}>{l}:</span> <span style={{ marginLeft: 4 }}>{v}</span></div>
-        ))}
+        {/* Inline add form */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 140px' }}>
+            <label style={{ ...labelStyle, fontSize: '0.7rem' }}>Location</label>
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={overrideForm.locationId} onChange={e => setOverrideForm(p => ({ ...p, locationId: e.target.value }))}>
+              <option value="">&mdash; Select &mdash;</option>
+              {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+            </select>
+          </div>
+          <div style={{ flex: '0 0 120px' }}>
+            <label style={{ ...labelStyle, fontSize: '0.7rem' }}>Sheet Length</label>
+            <FractionInput value={overrideForm.sheetLength} onChange={val => setOverrideForm(p => ({ ...p, sheetLength: val }))} placeholder="in" />
+          </div>
+          <div style={{ flex: '0 0 120px' }}>
+            <label style={{ ...labelStyle, fontSize: '0.7rem' }}>Sheet Width</label>
+            <FractionInput value={overrideForm.sheetWidth} onChange={val => setOverrideForm(p => ({ ...p, sheetWidth: val }))} placeholder="in" />
+          </div>
+          <div style={{ flex: '1 1 140px' }}>
+            <label style={{ ...labelStyle, fontSize: '0.7rem' }}>Trim Notes</label>
+            <input style={inputStyle} value={overrideForm.trimNotes} onChange={e => setOverrideForm(p => ({ ...p, trimNotes: e.target.value }))} placeholder="Notes..." />
+          </div>
+          <button style={{ ...btnPrimary, padding: '0.45rem 0.85rem', fontSize: '0.8rem', whiteSpace: 'nowrap' }} onClick={addOverride} disabled={addingOverride || !overrideForm.locationId}>{addingOverride ? '...' : 'Add'}</button>
+        </div>
+
+        {/* Overrides table */}
+        {(variant.locationOverrides ?? []).length === 0 ? (
+          <div style={{ color: c.textMuted, fontSize: '0.82rem', textAlign: 'center', padding: '1rem' }}>No location overrides.</div>
+        ) : (
+          <div style={{ overflow: 'hidden', borderRadius: 8, border: `1px solid ${c.divider}` }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${c.divider}` }}>
+                  {['Location', 'Sheet Length', 'Sheet Width', 'Trim Notes', 'Active', ''].map(h => (
+                    <th key={h} style={{ padding: '0.55rem 0.75rem', textAlign: 'left', fontSize: '0.68rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(variant.locationOverrides ?? []).map(ov => (
+                  <tr key={ov.id} style={{ borderBottom: `1px solid ${c.divider}` }}>
+                    <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.82rem' }}>{ov.location.name}</td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.82rem' }}>{ov.sheetLengthOverride ? decimalToFraction(Number(ov.sheetLengthOverride)) + '"' : '\u2014'}</td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.82rem' }}>{ov.sheetWidthOverride ? decimalToFraction(Number(ov.sheetWidthOverride)) + '"' : '\u2014'}</td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.82rem', color: c.textLabel }}>{ov.trimNotes || '\u2014'}</td>
+                    <td style={{ padding: '0.55rem 0.75rem', fontSize: '0.75rem' }}>
+                      <span style={{ color: ov.isActive ? '#22c55e' : '#64748b' }}>{ov.isActive ? 'Yes' : 'No'}</span>
+                    </td>
+                    <td style={{ padding: '0.55rem 0.75rem' }}>
+                      <button style={{ ...btnDanger, padding: '0.15rem 0.5rem', fontSize: '0.7rem' }} onClick={() => removeOverride(ov.id)}>Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -508,12 +773,26 @@ function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
       </Section>
 
       <Section title="Multi-Out / Multi-Sheet Layout">
+        <div style={{ marginBottom: '0.85rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.82rem', color: c.textLabel }}>
+            <input type="checkbox" checked={multiSheet} onChange={e => handleMultiSheetToggle(e.target.checked)} />
+            Multiple sheets per box
+          </label>
+        </div>
         <FormGrid cols={3}>
-          <Field label="Outs per Sheet"><input style={inputStyle} type="number" min="1" value={f.outsPerSheet} onChange={set('outsPerSheet')} /></Field>
-          <Field label="Sheets per Box"><input style={inputStyle} type="number" min="1" step="0.0001" value={f.sheetsPerBox} onChange={set('sheetsPerBox')} /></Field>
+          {!multiSheet && (
+            <Field label="Outs per Sheet"><input style={inputStyle} type="number" min="1" value={f.outsPerSheet} onChange={set('outsPerSheet')} /></Field>
+          )}
+          {multiSheet && (
+            <Field label="Sheets per Box"><input style={inputStyle} type="number" min="1" step="0.0001" value={f.sheetsPerBox} onChange={set('sheetsPerBox')} /></Field>
+          )}
           <Field label="Roll Width Required (in)"><input style={inputStyle} type="number" step="0.125" value={f.rollWidthRequired} onChange={set('rollWidthRequired')} /></Field>
-          <Field label="Sheet Length (in)"><input style={inputStyle} type="number" step="0.125" value={f.sheetLengthInches} onChange={set('sheetLengthInches')} /></Field>
-          <Field label="Sheet Width (in)"><input style={inputStyle} type="number" step="0.125" value={f.sheetWidthInches} onChange={set('sheetWidthInches')} /></Field>
+          <Field label="Sheet Length (in)">
+            <FractionInput value={f.sheetLengthInches} onChange={val => setF(p => ({ ...p, sheetLengthInches: val }))} />
+          </Field>
+          <Field label="Sheet Width (in)">
+            <FractionInput value={f.sheetWidthInches} onChange={val => setF(p => ({ ...p, sheetWidthInches: val }))} />
+          </Field>
         </FormGrid>
         <Field label="Layout Notes"><input style={inputStyle} value={f.layoutNotes} onChange={set('layoutNotes')} placeholder="e.g. 2-out landscape, alternating..." /></Field>
       </Section>
@@ -528,8 +807,12 @@ function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
 
       <Section title="Blank Dimensions">
         <FormGrid cols={3}>
-          <Field label="Blank Length (in) *"><input style={inputStyle} type="number" step="0.125" value={f.blankLengthInches} onChange={set('blankLengthInches')} /></Field>
-          <Field label="Blank Width (in) *"><input style={inputStyle} type="number" step="0.125" value={f.blankWidthInches} onChange={set('blankWidthInches')} /></Field>
+          <Field label="Blank Length (in) *">
+            <FractionInput value={f.blankLengthInches} onChange={val => setF(p => ({ ...p, blankLengthInches: val }))} />
+          </Field>
+          <Field label="Blank Width (in) *">
+            <FractionInput value={f.blankWidthInches} onChange={val => setF(p => ({ ...p, blankWidthInches: val }))} />
+          </Field>
           <Field label="Grain Direction"><Field label="">{sel('grainDirection', SELECT_OPTS.grain)}</Field></Field>
         </FormGrid>
       </Section>
@@ -543,18 +826,64 @@ function BlankSpecTab({ variant, materials, specId, onUpdated, flash }: {
       </Section>
 
       <Section title="Scoring">
-        <FormGrid cols={2}>
-          <Field label="Score Count *"><input style={inputStyle} type="number" min="0" value={f.scoreCount} onChange={set('scoreCount')} /></Field>
-        </FormGrid>
-        <Field label="Score Positions (JSON)">
-          <textarea style={{ ...inputStyle, height: 64, resize: 'vertical', fontFamily: 'monospace', fontSize: '0.8rem' }} value={f.scorePositions} onChange={set('scorePositions')} placeholder='[{"position":1,"measurement":12.5},{"position":2,"measurement":6.25}]' />
-        </Field>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '0.85rem' }}>
+          <span style={{ fontSize: '0.82rem', color: c.textLabel }}>{scores.length} score{scores.length !== 1 ? 's' : ''}</span>
+          <button
+            type="button"
+            style={{ ...btnSecondary, padding: '0.3rem 0.75rem', fontSize: '0.75rem' }}
+            onClick={autoCalcScores}
+          >Auto-Calculate (RSC)</button>
+          <button
+            type="button"
+            style={{ ...btnSecondary, padding: '0.3rem 0.75rem', fontSize: '0.75rem' }}
+            onClick={addScoreRow}
+          >+ Add Score</button>
+        </div>
+        {scores.length > 0 && (
+          <div style={{ overflow: 'hidden', borderRadius: 8, border: `1px solid ${c.divider}`, marginBottom: '0.85rem' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${c.divider}` }}>
+                  <th style={{ padding: '0.45rem 0.75rem', textAlign: 'left', fontSize: '0.68rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', width: 60 }}>Pos #</th>
+                  <th style={{ padding: '0.45rem 0.75rem', textAlign: 'left', fontSize: '0.68rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase' }}>Measurement (in)</th>
+                  <th style={{ padding: '0.45rem 0.75rem', textAlign: 'center', fontSize: '0.68rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', width: 70 }}>Source</th>
+                  <th style={{ padding: '0.45rem 0.75rem', width: 50 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {scores.map((s, idx) => (
+                  <tr key={idx} style={{ borderBottom: `1px solid ${c.divider}` }}>
+                    <td style={{ padding: '0.45rem 0.75rem', fontSize: '0.82rem', color: c.textLabel, fontWeight: 600 }}>{s.position}</td>
+                    <td style={{ padding: '0.45rem 0.75rem' }}>
+                      <FractionInput value={s.measurement} onChange={val => updateScoreMeasurement(idx, val)} placeholder="e.g. 12-3/8" />
+                    </td>
+                    <td style={{ padding: '0.45rem 0.75rem', textAlign: 'center' }}>
+                      <span style={{
+                        fontSize: '0.62rem', fontWeight: 600, padding: '0.12rem 0.35rem', borderRadius: 4,
+                        background: s.auto ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+                        color: s.auto ? '#22c55e' : '#f59e0b',
+                        border: `1px solid ${s.auto ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+                      }}>{s.auto ? 'auto' : 'manual'}</span>
+                    </td>
+                    <td style={{ padding: '0.45rem 0.75rem' }}>
+                      <button type="button" style={{ ...btnDanger, padding: '0.1rem 0.4rem', fontSize: '0.68rem' }} onClick={() => removeScoreRow(idx)}>x</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Section>
 
       <Section title="Slots, Cuts & Joint">
         <FormGrid cols={3}>
-          <Field label="Slot Depth (in)"><input style={inputStyle} type="number" step="0.0625" value={f.slotDepth} onChange={set('slotDepth')} /></Field>
-          <Field label="Slot Width (in)"><input style={inputStyle} type="number" step="0.0625" value={f.slotWidth} onChange={set('slotWidth')} /></Field>
+          <Field label="Slot Depth (in)">
+            <FractionInput value={f.slotDepth} onChange={val => setF(p => ({ ...p, slotDepth: val }))} />
+          </Field>
+          <Field label="Slot Width (in)">
+            <FractionInput value={f.slotWidth} onChange={val => setF(p => ({ ...p, slotWidth: val }))} />
+          </Field>
           <Field label="Trim Amount (in)"><input style={inputStyle} type="number" step="0.0625" value={f.trimAmount} onChange={set('trimAmount')} /></Field>
           <Field label="Joint Type"><Field label="">{sel('jointType', SELECT_OPTS.joint)}</Field></Field>
         </FormGrid>
@@ -699,6 +1028,7 @@ function CustomerItemsTab({ variant }: { variant: Variant }) {
     <div style={{ maxWidth: 700 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{rows.length} customer item{rows.length !== 1 ? 's' : ''} reference this variant</span>
+        <button style={btnPrimary} onClick={() => navigate(`/customer-items/new?variantId=${variant.id}&masterSpecId=${variant.masterSpec.id}`)}>+ New Customer Item</button>
       </div>
       {rows.length === 0 ? (
         <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items linked to this variant.</div>

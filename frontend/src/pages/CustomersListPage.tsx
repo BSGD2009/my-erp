@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
-import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle } from '../theme';
+import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle, STATUS_COLORS } from '../theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -12,6 +12,7 @@ interface PaymentTerm { id: number; termCode: string; termName: string; netDays:
 interface Customer {
   id: number; code: string; name: string; accountNumber?: string;
   city?: string; state?: string; creditHold: boolean; taxExempt: boolean; isActive: boolean;
+  acquisitionStatus?: string;
   paymentTerm?: { id: number; termName: string };
   defaultSalesRep?: { id: number; name: string };
   party?: { contacts: Array<{ id: number; name: string; phone?: string; email?: string }> };
@@ -23,6 +24,7 @@ const EMPTY_FORM = {
   street: '', city: '', state: '', zip: '', country: 'US',
   billingStreet: '', billingCity: '', billingState: '', billingZip: '', billingCountry: 'US',
   paymentTermId: '', creditLimit: '', creditHold: false, taxExempt: false, notes: '',
+  acquisitionStatus: '',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,6 +92,7 @@ export function CustomersListPage() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [search, setSearch]     = useState('');
+  const [acqFilter, setAcqFilter] = useState('');
   const [page, setPage]         = useState(1);
   const [sortBy, setSortBy]     = useState('name');
   const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('asc');
@@ -116,14 +119,15 @@ export function CustomersListPage() {
     try {
       const p = new URLSearchParams({ page: String(page), limit: String(LIMIT) });
       if (search) p.set('search', search);
+      if (acqFilter) p.set('acquisitionStatus', acqFilter);
       const res = await api.get<{ data: Customer[]; total: number }>(`/protected/customers?${p}`);
       setRows(res.data); setTotal(res.total);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
-  }, [search, page]);
+  }, [search, acqFilter, page]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); }, [search, acqFilter]);
 
   function onSort(col: string) {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -184,6 +188,7 @@ export function CustomersListPage() {
         creditHold:              f.creditHold,
         taxExempt:               f.taxExempt,
         notes:                   f.notes.trim() || null,
+        acquisitionStatus:       f.acquisitionStatus || null,
       };
       await api.post('/protected/customers', body);
       setDrawerOpen(false);
@@ -234,7 +239,13 @@ export function CustomersListPage() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        {search && <button style={btnSecondary} onClick={() => setSearch('')}>Clear</button>}
+        <select style={{ ...inputStyle, maxWidth: 180, cursor: 'pointer' }} value={acqFilter} onChange={e => setAcqFilter(e.target.value)}>
+          <option value="">All statuses</option>
+          {['PROSPECT', 'QUOTED', 'NEGOTIATING', 'WON', 'ONBOARDING', 'ACTIVE', 'LOST', 'DORMANT'].map(s => (
+            <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+          ))}
+        </select>
+        {(search || acqFilter) && <button style={btnSecondary} onClick={() => { setSearch(''); setAcqFilter(''); }}>Clear</button>}
       </div>
 
       {/* ── Error ── */}
@@ -254,15 +265,16 @@ export function CustomersListPage() {
               <Th col="cityState"  label="City / State"   sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <Th col="terms"      label="Terms"          sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Status</th>
+              <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Pipeline</th>
               <th style={{ padding: '0.75rem 1rem', width: 48 }} />
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>
+              <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>
             )}
             {!loading && sorted.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>
+              <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>
                 {search ? 'No customers match your search.' : 'No customers yet.'}
               </td></tr>
             )}
@@ -287,6 +299,12 @@ export function CustomersListPage() {
                 </td>
                 <td style={{ padding: '0.75rem 1rem' }}>
                   <StatusBadge creditHold={r.creditHold} isActive={r.isActive} />
+                </td>
+                <td style={{ padding: '0.75rem 1rem' }}>
+                  {r.acquisitionStatus ? (() => {
+                    const colors = STATUS_COLORS[r.acquisitionStatus!] ?? { bg: 'rgba(100,116,139,0.12)', text: '#94a3b8', border: 'rgba(100,116,139,0.2)' };
+                    return <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.2rem 0.5rem', borderRadius: 4, background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }}>{r.acquisitionStatus.replace(/_/g, ' ')}</span>;
+                  })() : '\u2014'}
                 </td>
                 <td style={{ padding: '0.75rem 0.5rem', textAlign: 'center' }}>
                   <button
@@ -407,6 +425,15 @@ export function CustomersListPage() {
 
         <Field label="Notes">
           <textarea style={{ ...inputStyle, height: 64, resize: 'vertical' }} value={f.notes} onChange={set('notes')} />
+        </Field>
+
+        <Field label="Acquisition Status">
+          <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.acquisitionStatus} onChange={set('acquisitionStatus')}>
+            <option value="">-- None --</option>
+            {['PROSPECT', 'QUOTED', 'NEGOTIATING', 'WON', 'ONBOARDING', 'ACTIVE', 'LOST', 'DORMANT'].map(s => (
+              <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+            ))}
+          </select>
         </Field>
 
         <div style={{ display: 'flex', gap: 8, marginTop: '0.5rem' }}>

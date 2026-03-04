@@ -11,6 +11,7 @@ const NAV_SECTIONS = [
     section: 'Master Data',
     items: [
       { path: '/customers',          label: 'Customers' },
+      { path: '/prospects',          label: 'Prospects' },
       { path: '/suppliers',          label: 'Suppliers' },
       { path: '/locations',          label: 'Locations' },
       { path: '/parties',            label: 'Parties' },
@@ -47,6 +48,7 @@ const NAV_SECTIONS = [
       { path: '/admin/resource-types',   label: 'Resource Types' },
       { path: '/admin/product-modules',  label: 'Product Modules' },
       { path: '/admin/board-grades',    label: 'Board Grades' },
+      { path: '/admin/blanket-contracts', label: 'Blanket Contracts' },
     ],
   },
 ];

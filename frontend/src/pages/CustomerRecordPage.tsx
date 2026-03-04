@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Drawer } from '../components/Drawer';
 import { api } from '../api/client';
-import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle } from '../theme';
+import { useAuth } from '../contexts/AuthContext';
+import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle, STATUS_COLORS } from '../theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -76,6 +77,15 @@ interface Customer {
   contacts: Contact[];
   shipToLocations: ShipTo[];
   _count: { orders: number; invoices: number };
+  acquisitionStatus?: string;
+  leadSource?: string;
+  competitorName?: string;
+  competitorRelationship?: string;
+  estimatedAnnualSpend?: string | number;
+  accountPotentialRating?: string;
+  otherProductsNeeded?: string;
+  currentSupplierNotes?: string;
+  blanketPoEligible?: boolean;
 }
 
 const CONTACT_TYPES = [
@@ -88,7 +98,7 @@ const CONTACT_TYPES = [
   'GENERAL',
 ];
 
-type TabKey = 'details' | 'contacts' | 'shipto' | 'orders' | 'ar' | 'price' | 'activity';
+type TabKey = 'details' | 'contacts' | 'shipto' | 'intelligence' | 'orders' | 'ar' | 'price' | 'activity';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'details',  label: 'Details' },
@@ -154,6 +164,11 @@ function Badge({ label, color, bg, border }: { label: string; color: string; bg:
 export function CustomerRecordPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const visibleTabs = user?.role === 'ADMIN'
+    ? [...TABS.slice(0, 3), { key: 'intelligence' as TabKey, label: 'Intelligence' }, ...TABS.slice(3)]
+    : TABS;
 
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
@@ -187,6 +202,13 @@ export function CustomerRecordPage() {
   const [shipToForm, setShipToForm] = useState({
     name: '', street: '', city: '', state: '', zip: '', country: 'US',
     contactName: '', contactPhone: '', contactEmail: '', isDefault: false, deliveryInstructions: '',
+  });
+
+  // Intelligence form
+  const [intelForm, setIntelForm] = useState({
+    acquisitionStatus: '', leadSource: '', accountPotentialRating: '',
+    estimatedAnnualSpend: '', competitorName: '', competitorRelationship: '',
+    otherProductsNeeded: '', currentSupplierNotes: '', blanketPoEligible: false,
   });
 
   function flash(text: string, type: 'success' | 'error' = 'success') {
@@ -232,6 +254,17 @@ export function CustomerRecordPage() {
         billingCountry: cust.billingCountry ?? '',
         notes: cust.notes ?? '',
         isActive: cust.isActive,
+      });
+      setIntelForm({
+        acquisitionStatus: cust.acquisitionStatus ?? '',
+        leadSource: cust.leadSource ?? '',
+        accountPotentialRating: cust.accountPotentialRating ?? '',
+        estimatedAnnualSpend: cust.estimatedAnnualSpend != null ? String(cust.estimatedAnnualSpend) : '',
+        competitorName: cust.competitorName ?? '',
+        competitorRelationship: cust.competitorRelationship ?? '',
+        otherProductsNeeded: cust.otherProductsNeeded ?? '',
+        currentSupplierNotes: cust.currentSupplierNotes ?? '',
+        blanketPoEligible: cust.blanketPoEligible ?? false,
       });
     } catch {
       setNotFound(true);
@@ -432,6 +465,33 @@ export function CustomerRecordPage() {
   const setShipToField = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setShipToForm(prev => ({ ...prev, [key]: e.target.value }));
 
+  const setIntelField = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setIntelForm(prev => ({ ...prev, [key]: e.target.value }));
+
+  // ── Intelligence save ─────────────────────────────────────────────────────
+
+  async function saveIntelligence() {
+    if (!customer) return;
+    try {
+      await api.put(`/protected/customers/${customer.id}`, {
+        acquisitionStatus: intelForm.acquisitionStatus || null,
+        leadSource: intelForm.leadSource || null,
+        accountPotentialRating: intelForm.accountPotentialRating || null,
+        estimatedAnnualSpend: intelForm.estimatedAnnualSpend ? parseFloat(intelForm.estimatedAnnualSpend) : null,
+        competitorName: intelForm.competitorName || null,
+        competitorRelationship: intelForm.competitorRelationship || null,
+        otherProductsNeeded: intelForm.otherProductsNeeded || null,
+        currentSupplierNotes: intelForm.currentSupplierNotes || null,
+        blanketPoEligible: intelForm.blanketPoEligible,
+      });
+      flash('Intelligence data saved.');
+      await loadCustomer();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Save failed';
+      flash(message, 'error');
+    }
+  }
+
   // ── Loading / not-found states ─────────────────────────────────────────────
 
   if (loading) {
@@ -510,7 +570,7 @@ export function CustomerRecordPage() {
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 4, marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-        {TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.key} style={tabStyle(tab === t.key)} onClick={() => setTab(t.key)}>
             {t.label}
           </button>
@@ -905,6 +965,85 @@ export function CustomerRecordPage() {
               <button style={btnSecondary} onClick={() => setShipToDrawerOpen(false)}>Cancel</button>
             </div>
           </Drawer>
+        </div>
+      )}
+
+      {/* ── Intelligence Tab ─────────────────────────────────────────────── */}
+      {tab === 'intelligence' && (
+        <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 800 }}>
+          <h3 style={{ margin: '0 0 1rem', fontSize: '0.9rem', fontWeight: 600, color: c.textPrimary }}>
+            Acquisition Pipeline
+          </h3>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+            {['PROSPECT', 'QUOTED', 'NEGOTIATING', 'WON', 'ONBOARDING', 'ACTIVE', 'LOST', 'DORMANT'].map(status => {
+              const active = intelForm.acquisitionStatus === status;
+              const colors = STATUS_COLORS[status] ?? { bg: 'rgba(100,116,139,0.12)', text: '#94a3b8', border: 'rgba(100,116,139,0.2)' };
+              return (
+                <button
+                  key={status}
+                  onClick={() => setIntelForm(p => ({ ...p, acquisitionStatus: status }))}
+                  style={{
+                    padding: '0.35rem 0.75rem', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600,
+                    background: active ? colors.bg : 'transparent',
+                    border: `1px solid ${active ? colors.border : c.inputBorder}`,
+                    color: active ? colors.text : c.textMuted,
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  {status.replace(/_/g, ' ')}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ height: 1, background: c.divider, margin: '1rem 0' }} />
+
+          <h3 style={{ margin: '0 0 1rem', fontSize: '0.9rem', fontWeight: 600, color: c.textPrimary }}>
+            Intelligence Details
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 1.25rem' }}>
+            <Field label="Lead Source">
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={intelForm.leadSource} onChange={setIntelField('leadSource')}>
+                <option value="">-- None --</option>
+                {['INBOUND_CALL', 'OUTBOUND_SALES', 'REFERRAL', 'TRADE_SHOW', 'BROKER', 'DISTRIBUTOR', 'OTHER'].map(v => (
+                  <option key={v} value={v}>{v.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Account Potential Rating">
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={intelForm.accountPotentialRating} onChange={setIntelField('accountPotentialRating')}>
+                <option value="">-- None --</option>
+                {['A', 'B', 'C', 'D'].map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="Estimated Annual Spend ($)">
+              <input style={inputStyle} type="number" step="0.01" value={intelForm.estimatedAnnualSpend} onChange={setIntelField('estimatedAnnualSpend')} />
+            </Field>
+            <Field label="Competitor Name">
+              <input style={inputStyle} value={intelForm.competitorName} onChange={setIntelField('competitorName')} />
+            </Field>
+            <Field label="Competitor Relationship">
+              <select style={{ ...inputStyle, cursor: 'pointer' }} value={intelForm.competitorRelationship} onChange={setIntelField('competitorRelationship')}>
+                <option value="">-- None --</option>
+                {['OUR_DISTRIBUTOR', 'COMPETITOR', 'UNKNOWN'].map(v => (
+                  <option key={v} value={v}>{v.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Blanket PO Eligible">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer', marginTop: 4 }}>
+                <input type="checkbox" checked={intelForm.blanketPoEligible} onChange={e => setIntelForm(p => ({ ...p, blanketPoEligible: e.target.checked }))} />
+                Eligible for blanket PO
+              </label>
+            </Field>
+          </div>
+          <Field label="Other Products Needed" full>
+            <textarea style={{ ...inputStyle, height: 64, resize: 'vertical' }} value={intelForm.otherProductsNeeded} onChange={setIntelField('otherProductsNeeded')} />
+          </Field>
+          <Field label="Current Supplier Notes" full>
+            <textarea style={{ ...inputStyle, height: 64, resize: 'vertical' }} value={intelForm.currentSupplierNotes} onChange={setIntelField('currentSupplierNotes')} />
+          </Field>
+          <button style={btnPrimary} onClick={saveIntelligence}>Save Intelligence</button>
         </div>
       )}
 

@@ -337,6 +337,10 @@ router.get('/:id/variants/:vid', async (req, res) => {
         include: { customer: { select: { id: true, code: true, name: true } } },
         orderBy: { customer: { name: 'asc' } },
       },
+      locationOverrides: {
+        where: { isActive: true },
+        include: { location: { select: { id: true, name: true } } },
+      },
     },
   });
   if (!variant) { res.status(404).json({ error: 'Variant not found' }); return; }
@@ -746,6 +750,235 @@ router.delete('/:id/variants/:vid/blank-spec', async (req, res) => {
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Blank spec not found' }); return; }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// =============================================================================
+// LOCATION OVERRIDES  /api/protected/master-specs/:id/variants/:vid/location-overrides
+// =============================================================================
+
+router.get('/:id/variants/:vid/location-overrides', async (req, res) => {
+  const masterSpecId = parseInt(req.params.id);
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+
+  const overrides = await prisma.blankSpecLocationOverride.findMany({
+    where: { variantId },
+    include: { location: { select: { id: true, name: true } } },
+  });
+  res.json(overrides);
+});
+
+router.post('/:id/variants/:vid/location-overrides', async (req, res) => {
+  const masterSpecId = parseInt(req.params.id);
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+
+  const { locationId, sheetLengthOverride, sheetWidthOverride, trimNotes } = req.body as Record<string, unknown>;
+  if (!locationId) { res.status(400).json({ error: 'locationId is required' }); return; }
+
+  // Validate variant exists and belongs to master spec
+  const variant = await prisma.productVariant.findFirst({ where: { id: variantId, masterSpecId }, select: { id: true } });
+  if (!variant) { res.status(404).json({ error: 'Variant not found' }); return; }
+
+  try {
+    const override = await prisma.blankSpecLocationOverride.create({
+      data: {
+        variantId,
+        locationId:          Number(locationId),
+        sheetLengthOverride: sheetLengthOverride != null ? (sheetLengthOverride as string | number) : null,
+        sheetWidthOverride:  sheetWidthOverride  != null ? (sheetWidthOverride  as string | number) : null,
+        trimNotes:           trimNotes           != null ? String(trimNotes).trim() : null,
+      },
+      include: { location: { select: { id: true, name: true } } },
+    });
+    res.status(201).json(override);
+  } catch (err: any) {
+    if (err.code === 'P2002') { res.status(409).json({ error: 'An override for this variant + location already exists' }); return; }
+    if (err.code === 'P2003') { res.status(400).json({ error: 'Location not found' }); return; }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/:id/variants/:vid/location-overrides/:oid', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
+  const overrideId = parseInt(req.params.oid);
+  if (isNaN(variantId) || isNaN(overrideId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+
+  const { sheetLengthOverride, sheetWidthOverride, trimNotes, isActive } = req.body as Record<string, unknown>;
+  const d: Record<string, unknown> = {};
+  if (sheetLengthOverride !== undefined) d.sheetLengthOverride = sheetLengthOverride != null ? (sheetLengthOverride as string | number) : null;
+  if (sheetWidthOverride  !== undefined) d.sheetWidthOverride  = sheetWidthOverride  != null ? (sheetWidthOverride  as string | number) : null;
+  if (trimNotes           !== undefined) d.trimNotes           = trimNotes           != null ? String(trimNotes).trim() : null;
+  if (isActive            !== undefined) d.isActive            = Boolean(isActive);
+
+  try {
+    const override = await prisma.blankSpecLocationOverride.update({
+      where: { id: overrideId, variantId },
+      data:  d as any,
+      include: { location: { select: { id: true, name: true } } },
+    });
+    res.json(override);
+  } catch (err: any) {
+    if (err.code === 'P2025') { res.status(404).json({ error: 'Location override not found' }); return; }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.delete('/:id/variants/:vid/location-overrides/:oid', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
+  const overrideId = parseInt(req.params.oid);
+  if (isNaN(variantId) || isNaN(overrideId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  try {
+    await prisma.blankSpecLocationOverride.delete({ where: { id: overrideId, variantId } });
+    res.status(204).send();
+  } catch (err: any) {
+    if (err.code === 'P2025') { res.status(404).json({ error: 'Location override not found' }); return; }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// =============================================================================
+// VARIANT DUPLICATE  /api/protected/master-specs/:id/variants/:vid/duplicate
+// =============================================================================
+
+router.post('/:id/variants/:vid/duplicate', async (req, res) => {
+  const masterSpecId = parseInt(req.params.id);
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+
+  // Fetch source variant with blankSpec and bomLines
+  const source = await prisma.productVariant.findFirst({
+    where: { id: variantId, masterSpecId },
+    include: {
+      blankSpec: true,
+      bomLines: true,
+    },
+  });
+  if (!source) { res.status(404).json({ error: 'Variant not found' }); return; }
+
+  // Auto-generate new SKU: append -COPY, -COPY2, -COPY3, etc.
+  let newSku = `${source.sku}-COPY`;
+  let existing = await prisma.productVariant.findUnique({ where: { sku: newSku }, select: { id: true } });
+  if (existing) {
+    for (let i = 2; i <= 99; i++) {
+      newSku = `${source.sku}-COPY${i}`;
+      existing = await prisma.productVariant.findUnique({ where: { sku: newSku }, select: { id: true } });
+      if (!existing) break;
+    }
+  }
+
+  try {
+    const newVariant = await prisma.$transaction(async (tx) => {
+      // Create variant copy (omit id, sku, createdAt, updatedAt)
+      const variant = await tx.productVariant.create({
+        data: {
+          masterSpecId:       source.masterSpecId,
+          sku:                newSku,
+          variantDescription: source.variantDescription,
+          boardGradeId:       source.boardGradeId,
+          flute:              source.flute,
+          caliper:            source.caliper,
+          width:              source.width,
+          length:             source.length,
+          thickness:          source.thickness,
+          bundleQty:          source.bundleQty,
+          caseQty:            source.caseQty,
+          listPrice:          source.listPrice,
+          isActive:           source.isActive,
+        },
+      });
+
+      // Copy blankSpec if source has one (omit id, variantId, createdAt, updatedAt)
+      if (source.blankSpec) {
+        const bs = source.blankSpec;
+        await tx.blankSpec.create({
+          data: {
+            variantId:         variant.id,
+            materialId:        bs.materialId,
+            outsPerSheet:      bs.outsPerSheet,
+            sheetsPerBox:      bs.sheetsPerBox,
+            sheetLengthInches: bs.sheetLengthInches,
+            sheetWidthInches:  bs.sheetWidthInches,
+            layoutNotes:       bs.layoutNotes,
+            rollWidthRequired: bs.rollWidthRequired,
+            requiredDieId:     bs.requiredDieId,
+            requiredPlateIds:  bs.requiredPlateIds,
+            materialVariantId: bs.materialVariantId,
+            blankLengthInches: bs.blankLengthInches,
+            blankWidthInches:  bs.blankWidthInches,
+            grainDirection:    bs.grainDirection,
+            boardGrade:        bs.boardGrade,
+            flute:             bs.flute,
+            wallType:          bs.wallType,
+            scoreCount:        bs.scoreCount,
+            scorePositions:    bs.scorePositions,
+            slotDepth:         bs.slotDepth,
+            slotWidth:         bs.slotWidth,
+            specialCuts:       bs.specialCuts,
+            trimAmount:        bs.trimAmount,
+            jointType:         bs.jointType,
+            printType:         bs.printType,
+            printColors:       bs.printColors,
+            inkTypes:          bs.inkTypes,
+            plateNumbers:      bs.plateNumbers,
+            coating:           bs.coating,
+            bundleCount:       bs.bundleCount,
+            tieHigh:           bs.tieHigh,
+            tierWide:          bs.tierWide,
+            palletsPerOrder:   bs.palletsPerOrder,
+            notes:             bs.notes,
+          },
+        });
+      }
+
+      // Copy bomLines if source has any (omit id, variantId)
+      if (source.bomLines.length > 0) {
+        await tx.bOMLine.createMany({
+          data: source.bomLines.map((bl) => ({
+            variantId:     variant.id,
+            materialId:    bl.materialId,
+            quantityPer:   bl.quantityPer,
+            unitOfMeasure: bl.unitOfMeasure,
+          })),
+        });
+      }
+
+      // Return the new variant with all includes
+      return tx.productVariant.findUnique({
+        where: { id: variant.id },
+        include: {
+          masterSpec: { select: { id: true, sku: true, name: true } },
+          boardGrade: { select: { id: true, gradeCode: true, gradeName: true, wallType: true, nominalCaliper: true } },
+          blankSpec: {
+            include: {
+              material:        { select: { id: true, code: true, name: true, unitOfMeasure: true } },
+              requiredDie:     { select: { id: true, toolNumber: true, type: true, condition: true } },
+              materialVariant: { select: { id: true, variantCode: true, description: true, rollWidth: true, sheetLength: true, sheetWidth: true } },
+            },
+          },
+          bomLines: {
+            include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
+            orderBy: { material: { name: 'asc' } },
+          },
+          customerItems: {
+            where: { isActive: true },
+            include: { customer: { select: { id: true, code: true, name: true } } },
+            orderBy: { customer: { name: 'asc' } },
+          },
+          locationOverrides: {
+            where: { isActive: true },
+            include: { location: { select: { id: true, name: true } } },
+          },
+        },
+      });
+    });
+
+    res.status(201).json(newVariant);
+  } catch (err: any) {
+    if (err.code === 'P2002') { res.status(409).json({ error: 'Duplicate SKU conflict — try again' }); return; }
+    console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

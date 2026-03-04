@@ -1,10 +1,10 @@
-import { PrismaClient, Role, ContactType, PartyRoleType, BoxStyle, Flute, WallType, PrintType, CoatingType, GrainDirection, JointType, LocationType, FulfillmentPath } from '@prisma/client'
+import { PrismaClient, Role, ContactType, PartyRoleType, BoxStyle, Flute, WallType, PrintType, CoatingType, GrainDirection, JointType, LocationType, FulfillmentPath, AcquisitionStatus } from '@prisma/client'
 import bcrypt from 'bcrypt'
 
 const prisma = new PrismaClient()
 
 async function main() {
-  console.log('Seeding BoxERP database (schema v7)...')
+  console.log('Seeding BoxERP database (schema v9)...')
 
   // ── Payment Terms ──────────────────────────────────────────────────────────
 
@@ -404,6 +404,7 @@ async function main() {
       code: 'ACME01', name: 'Acme Manufacturing Co', partyId: partyAcme.id,
       street: '789 Factory Road', city: 'Springfield', state: 'IL', zip: '62701', country: 'US',
       paymentTermId: termNet30.id, creditLimit: 50000, defaultSalesRepId: csr.id,
+      acquisitionStatus: AcquisitionStatus.ACTIVE,
     },
   })
 
@@ -413,6 +414,7 @@ async function main() {
       code: 'METRO02', name: 'Metro Foods Inc', partyId: partyMetro.id,
       street: '321 Commerce St', city: 'Chicago', state: 'IL', zip: '60601', country: 'US',
       paymentTermId: termNet60.id, creditLimit: 100000, defaultSalesRepId: csr.id,
+      acquisitionStatus: AcquisitionStatus.ACTIVE,
     },
   })
 
@@ -422,6 +424,7 @@ async function main() {
       code: 'COAST03', name: 'Coastal Distribution LLC', partyId: partyCoastal.id,
       street: '654 Harbor Blvd', city: 'Waukegan', state: 'IL', zip: '60085', country: 'US',
       paymentTermId: termNet30.id, creditLimit: 75000, defaultSalesRepId: admin.id,
+      acquisitionStatus: AcquisitionStatus.ACTIVE,
     },
   })
 

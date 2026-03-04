@@ -1,5 +1,5 @@
-// BoxERP — Prisma Schema v7
-// Session 4 Review v2: Architecture Overhaul
+// BoxERP — Prisma Schema v9
+// Pre-Session 5: Intelligence fields, blanket contracts, print plate status
 //   - Party model (Party, PartyRole, PartyContact) — unified contacts
 //   - Unified Location (partyId, replaces ShipToAddress)
 //   - Resource model (replaces WorkCenter + Equipment)
@@ -128,9 +128,11 @@ enum CommitmentStatus {
 enum QuoteStatus {
   DRAFT
   SENT
+  UNDER_REVIEW
   ACCEPTED
   DECLINED
   EXPIRED
+  CONVERTED
 }
 
 enum OrderStatus {
@@ -234,6 +236,59 @@ enum ToolCondition {
   RETIRED
 }
 
+enum PrintPlateStatus {
+  NO_PRINT_NEEDED
+  PLATE_EXISTS
+  PLATE_NEEDED
+  PLATE_ON_ORDER
+}
+
+enum AcquisitionStatus {
+  PROSPECT
+  QUOTED
+  NEGOTIATING
+  WON
+  ONBOARDING
+  ACTIVE
+  LOST
+  DORMANT
+}
+
+enum LeadSource {
+  INBOUND_CALL
+  OUTBOUND_SALES
+  REFERRAL
+  TRADE_SHOW
+  BROKER
+  DISTRIBUTOR
+  OTHER
+}
+
+enum CompetitorRelationship {
+  OUR_DISTRIBUTOR
+  COMPETITOR
+  UNKNOWN
+}
+
+enum AccountPotentialRating {
+  A
+  B
+  C
+  D
+}
+
+enum CustomerStatedPriceSource {
+  COMPETITOR
+  DISTRIBUTOR
+  UNKNOWN
+}
+
+enum BlanketContractStatus {
+  ACTIVE
+  EXPIRED
+  RENEGOTIATING
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LOOKUP / ADMIN TABLES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -296,7 +351,8 @@ model BoardGrade {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  variants ProductVariant[]
+  variants   ProductVariant[]
+  quoteItems QuoteItem[]
 }
 
 model ModuleSpecField {
@@ -332,6 +388,7 @@ model Party {
   locations Location[]
   customers Customer[]
   suppliers Supplier[]
+  quotes    Quote[]
 }
 
 model PartyRole {
@@ -380,14 +437,17 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  quotesCreated          Quote[]                @relation("QuoteCreatedBy")
-  ordersCreated          SalesOrder[]           @relation("OrderCreatedBy")
-  purchaseOrdersCreated  PurchaseOrder[]        @relation("POCreatedBy")
-  materialTransactions   MaterialTransaction[]  @relation("TransactionCreatedBy")
-  customersAsRep         Customer[]             @relation("CustomerSalesRep")
-  confirmedShipments     Shipment[]             @relation("ShipmentConfirmedBy")
-  productionConsumptions ProductionConsumption[]
-  inventoryTransfers     InventoryTransfer[]
+  quotesCreated              Quote[]                @relation("QuoteCreatedBy")
+  quotesAsRep                Quote[]                @relation("QuoteSalesRep")
+  ordersCreated              SalesOrder[]           @relation("OrderCreatedBy")
+  purchaseOrdersCreated      PurchaseOrder[]        @relation("POCreatedBy")
+  materialTransactions       MaterialTransaction[]  @relation("TransactionCreatedBy")
+  customersAsRep             Customer[]             @relation("CustomerSalesRep")
+  confirmedShipments         Shipment[]             @relation("ShipmentConfirmedBy")
+  productionConsumptions     ProductionConsumption[]
+  inventoryTransfers         InventoryTransfer[]
+  blanketContractsCreated    BlanketContract[]
+  blanketContractLinesLocked BlanketContractLine[] @relation("BlanketContractLineLocked")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -428,6 +488,7 @@ model Location {
   transfersTo            InventoryTransfer[]      @relation("TransferTo")
   resources              Resource[]
   inventoryCommitments   InventoryCommitment[]
+  blankSpecOverrides     BlankSpecLocationOverride[]
 
   @@index([partyId])
 }
@@ -459,18 +520,28 @@ model Customer {
   notes                    String?
   defaultOverTolerance     Decimal  @default(10.0) @db.Decimal(6, 2)
   defaultUnderTolerance    Decimal  @default(10.0) @db.Decimal(6, 2)
+  acquisitionStatus        AcquisitionStatus?
+  leadSource               LeadSource?
+  competitorName           String?
+  competitorRelationship   CompetitorRelationship?
+  estimatedAnnualSpend     Decimal? @db.Decimal(12, 2)
+  accountPotentialRating   AccountPotentialRating?
+  otherProductsNeeded      String?
+  currentSupplierNotes     String?
+  blanketPoEligible        Boolean  @default(false)
   isActive                 Boolean  @default(true)
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
 
-  party           Party?        @relation(fields: [partyId], references: [id])
-  paymentTerm     PaymentTerm?  @relation(fields: [paymentTermId], references: [id])
-  defaultSalesRep User?         @relation("CustomerSalesRep", fields: [defaultSalesRepId], references: [id])
-  quotes          Quote[]
-  orders          SalesOrder[]
-  invoices        Invoice[]
-  tooling         Tooling[]
-  customerItems   CustomerItem[]
+  party              Party?        @relation(fields: [partyId], references: [id])
+  paymentTerm        PaymentTerm?  @relation(fields: [paymentTermId], references: [id])
+  defaultSalesRep    User?         @relation("CustomerSalesRep", fields: [defaultSalesRepId], references: [id])
+  quotes             Quote[]
+  orders             SalesOrder[]
+  invoices           Invoice[]
+  tooling            Tooling[]
+  customerItems      CustomerItem[]
+  blanketContracts   BlanketContract[]
 
   @@index([partyId])
   @@index([defaultSalesRepId])
@@ -502,6 +573,7 @@ model Supplier {
   paymentTerm    PaymentTerm?     @relation(fields: [paymentTermId], references: [id])
   purchaseOrders PurchaseOrder[]
   resources      Resource[]
+  quoteItems     QuoteItem[]
 
   @@index([partyId])
 }
@@ -780,30 +852,36 @@ model MasterSpec {
   customerItems          CustomerItem[]
   tooling                Tooling[]
   inventoryCommitments   InventoryCommitment[]
+  quoteItems             QuoteItem[]
 
   @@index([categoryId])
 }
 
 model CustomerItem {
-  id              Int             @id @default(autoincrement())
-  code            String          @unique
-  name            String
-  description     String?
-  customerId      Int
-  masterSpecId    Int?
-  variantId       Int
-  listPrice       Decimal?        @db.Decimal(12, 4)
-  fulfillmentPath FulfillmentPath @default(MANUFACTURE)
-  isActive        Boolean         @default(true)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                     Int              @id @default(autoincrement())
+  code                   String           @unique
+  name                   String
+  description            String?
+  customerId             Int
+  masterSpecId           Int?
+  variantId              Int
+  partNumber             String?
+  listPrice              Decimal?         @db.Decimal(12, 4)
+  fulfillmentPath        FulfillmentPath  @default(MANUFACTURE)
+  printPlateStatus       PrintPlateStatus @default(NO_PRINT_NEEDED)
+  printPlateExpectedDate DateTime?
+  printPlateRequired     Boolean          @default(false)
+  isActive               Boolean          @default(true)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
-  customer   Customer        @relation(fields: [customerId], references: [id])
-  masterSpec MasterSpec?     @relation(fields: [masterSpecId], references: [id])
-  variant    ProductVariant  @relation(fields: [variantId], references: [id])
-  tooling    Tooling[]
-  quoteItems QuoteItem[]
-  orderItems SalesOrderItem[]
+  customer              Customer              @relation(fields: [customerId], references: [id])
+  masterSpec            MasterSpec?            @relation(fields: [masterSpecId], references: [id])
+  variant               ProductVariant         @relation(fields: [variantId], references: [id])
+  tooling               Tooling[]
+  quoteItems            QuoteItem[]
+  orderItems            SalesOrderItem[]
+  blanketContractLines  BlanketContractLine[]
 
   @@index([customerId])
   @@index([masterSpecId])
@@ -884,6 +962,23 @@ model BlankSpec {
   materialVariant MaterialVariant? @relation(fields: [materialVariantId], references: [id])
 }
 
+model BlankSpecLocationOverride {
+  id                  Int      @id @default(autoincrement())
+  variantId           Int
+  locationId          Int
+  sheetLengthOverride Decimal? @db.Decimal(8, 3)
+  sheetWidthOverride  Decimal? @db.Decimal(8, 3)
+  trimNotes           String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  variant  ProductVariant @relation(fields: [variantId], references: [id])
+  location Location       @relation(fields: [locationId], references: [id])
+
+  @@unique([variantId, locationId])
+}
+
 model BOMLine {
   id            Int     @id @default(autoincrement())
   variantId     Int
@@ -955,6 +1050,8 @@ model ProductVariant {
   finishedGoodsInventory FinishedGoodsInventory[]
   customerItems          CustomerItem[]
   inventoryCommitments   InventoryCommitment[]
+  locationOverrides      BlankSpecLocationOverride[]
+  blanketContractLines   BlanketContractLine[]
 
   @@index([masterSpecId])
   @@index([boardGradeId])
@@ -1036,18 +1133,26 @@ model InventoryTransfer {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Quote {
-  id          Int         @id @default(autoincrement())
-  quoteNumber String      @unique
-  customerId  Int
-  createdById Int
-  status      QuoteStatus @default(DRAFT)
-  expiresAt   DateTime?
-  notes       String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id                       Int                       @id @default(autoincrement())
+  quoteNumber              String                    @unique
+  customerId               Int
+  createdById              Int
+  partyId                  Int?
+  salesRepId               Int?
+  status                   QuoteStatus               @default(DRAFT)
+  expiresAt                DateTime?
+  validUntil               DateTime?
+  customerStatedPrice      Decimal?                  @db.Decimal(12, 4)
+  customerStatedPriceSource CustomerStatedPriceSource?
+  internalNotes            String?
+  notes                    String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
 
   customer  Customer    @relation(fields: [customerId],  references: [id])
   createdBy User        @relation("QuoteCreatedBy", fields: [createdById], references: [id])
+  party     Party?      @relation(fields: [partyId], references: [id])
+  salesRep  User?       @relation("QuoteSalesRep", fields: [salesRepId], references: [id])
   items     QuoteItem[]
   order     SalesOrder?
 
@@ -1056,23 +1161,51 @@ model Quote {
 }
 
 model QuoteItem {
-  id             Int     @id @default(autoincrement())
-  quoteId        Int
-  customerItemId Int?
-  variantId      Int?
-  lineNumber     Int
-  description    String
-  quantity       Int
-  unitPrice      Decimal @db.Decimal(12, 4)
-  notes          String?
+  id                        Int      @id @default(autoincrement())
+  quoteId                   Int
+  customerItemId            Int?
+  variantId                 Int?
+  masterSpecId              Int?
+  boardGradeId              Int?
+  flute                     String?
+  lineNumber                Int
+  description               String
+  quantity                  Decimal  @db.Decimal(14, 4)
+  quantityUnit              String?  @default("EACH")
+  sortOrder                 Int      @default(0)
+  unitPrice                 Decimal  @db.Decimal(12, 4)
+  notes                     String?
+  // Cost fields
+  materialCostPerM          Decimal? @db.Decimal(12, 4)
+  bomCostPerM               Decimal? @db.Decimal(12, 4)
+  totalCostPerM             Decimal? @db.Decimal(12, 4)
+  selectedSupplierId        Int?
+  materialCostSnapshotDate  DateTime?
+  // Pricing fields
+  unitPricePerM             Decimal? @db.Decimal(12, 4)
+  extendedPrice             Decimal? @db.Decimal(12, 4)
+  marginPercent             Decimal? @db.Decimal(12, 4)
+  customerTargetPrice       Decimal? @db.Decimal(12, 4)
+  priceGap                  Decimal? @db.Decimal(12, 4)
+  priceGapPercent           Decimal? @db.Decimal(12, 4)
+  // Alt quantities
+  altQty1                   Decimal? @db.Decimal(14, 4)
+  altPrice1                 Decimal? @db.Decimal(12, 4)
+  altQty2                   Decimal? @db.Decimal(14, 4)
+  altPrice2                 Decimal? @db.Decimal(12, 4)
+  altQty3                   Decimal? @db.Decimal(14, 4)
+  altPrice3                 Decimal? @db.Decimal(12, 4)
 
-  quote        Quote              @relation(fields: [quoteId],        references: [id], onDelete: Cascade)
-  customerItem CustomerItem?      @relation(fields: [customerItemId], references: [id])
-  variant      ProductVariant?    @relation(fields: [variantId],      references: [id])
-  boxSpec      BoxSpec?           @relation("QuoteItemBoxSpec")
-  blankSpec    BlankSpec?         @relation("QuoteItemBlankSpec")
-  bomLines     QuoteItemBOMLine[]
-  orderItems   SalesOrderItem[]
+  quote            Quote              @relation(fields: [quoteId],        references: [id], onDelete: Cascade)
+  customerItem     CustomerItem?      @relation(fields: [customerItemId], references: [id])
+  variant          ProductVariant?    @relation(fields: [variantId],      references: [id])
+  masterSpec       MasterSpec?        @relation(fields: [masterSpecId],   references: [id])
+  boardGrade       BoardGrade?        @relation(fields: [boardGradeId],   references: [id])
+  selectedSupplier Supplier?          @relation(fields: [selectedSupplierId], references: [id])
+  boxSpec          BoxSpec?           @relation("QuoteItemBoxSpec")
+  blankSpec        BlankSpec?         @relation("QuoteItemBlankSpec")
+  bomLines         QuoteItemBOMLine[]
+  orderItems       SalesOrderItem[]
 
   @@unique([quoteId, lineNumber])
   @@index([quoteId])
@@ -1323,4 +1456,50 @@ model Invoice {
   @@index([customerId])
   @@index([status])
   @@index([qbSyncStatus])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLANKET CONTRACTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BlanketContract {
+  id                  Int                    @id @default(autoincrement())
+  customerId          Int
+  contractNumber      String                 @unique
+  status              BlanketContractStatus  @default(ACTIVE)
+  startDate           DateTime
+  endDate             DateTime
+  totalCommittedValue Decimal?               @db.Decimal(12, 2)
+  notes               String?
+  createdById         Int
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  customer  Customer              @relation(fields: [customerId], references: [id])
+  createdBy User                  @relation(fields: [createdById], references: [id])
+  lines     BlanketContractLine[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model BlanketContractLine {
+  id                Int      @id @default(autoincrement())
+  blanketContractId Int
+  customerItemId    Int?
+  variantId         Int?
+  committedQty      Decimal  @db.Decimal(14, 4)
+  unitPrice         Decimal  @db.Decimal(12, 4)
+  validFrom         DateTime
+  validTo           DateTime
+  priceLockedAt     DateTime
+  priceLockedById   Int
+  notes             String?
+
+  blanketContract BlanketContract @relation(fields: [blanketContractId], references: [id], onDelete: Cascade)
+  customerItem    CustomerItem?   @relation(fields: [customerItemId], references: [id])
+  variant         ProductVariant? @relation(fields: [variantId], references: [id])
+  priceLockedBy   User            @relation("BlanketContractLineLocked", fields: [priceLockedById], references: [id])
+
+  @@index([blanketContractId])
 }

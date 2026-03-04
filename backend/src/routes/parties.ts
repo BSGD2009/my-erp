@@ -19,20 +19,34 @@ async function generatePartyCode(name: string): Promise<string> {
 
 // ── GET /api/protected/parties ──────────────────────────────────────────────
 router.get('/', async (req, res) => {
-  const { active } = req.query as Record<string, string>;
+  const { active, search, page = '1', limit = '50' } = req.query as Record<string, string>;
+  const pageNum  = Math.max(1, parseInt(page));
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+
   const where: Record<string, unknown> = {
     isActive: active === 'false' ? false : true,
   };
+  if (search) {
+    where.OR = [
+      { name:      { contains: search, mode: 'insensitive' } },
+      { partyCode: { contains: search, mode: 'insensitive' } },
+    ];
+  }
 
-  const parties = await prisma.party.findMany({
-    where: where as any,
-    orderBy: { name: 'asc' },
-    include: {
-      roles:  { orderBy: { roleType: 'asc' } },
-      _count: { select: { contacts: true } },
-    },
-  });
-  res.json(parties);
+  const [data, total] = await Promise.all([
+    prisma.party.findMany({
+      where: where as any,
+      orderBy: { name: 'asc' },
+      skip: (pageNum - 1) * limitNum,
+      take: limitNum,
+      include: {
+        roles:  { orderBy: { roleType: 'asc' } },
+        _count: { select: { contacts: true } },
+      },
+    }),
+    prisma.party.count({ where: where as any }),
+  ]);
+  res.json({ data, total, page: pageNum, limit: limitNum });
 });
 
 // ── GET /api/protected/parties/:id ──────────────────────────────────────────

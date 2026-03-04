@@ -20,13 +20,17 @@ async function generateCode(name: string): Promise<string> {
 
 // ── GET /api/protected/customers ─────────────────────────────────────────────
 router.get('/', async (req, res) => {
-  const { search, active, page = '1', limit = '50' } = req.query as Record<string, string>;
+  const { search, active, acquisitionStatus, page = '1', limit = '50' } = req.query as Record<string, string>;
   const pageNum  = Math.max(1, parseInt(page));
   const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
 
   const where: Record<string, unknown> = {
     isActive: active === 'false' ? false : true,
   };
+  if (acquisitionStatus) {
+    const statuses = String(acquisitionStatus).split(',').map(s => s.trim());
+    where.acquisitionStatus = { in: statuses };
+  }
   if (search) {
     where.OR = [
       { name:          { contains: search, mode: 'insensitive' } },
@@ -126,6 +130,15 @@ router.post('/', async (req, res) => {
         taxExemptId:             b.taxExemptId             ? String(b.taxExemptId).trim()             : null,
         defaultSalesRepId:       b.defaultSalesRepId != null ? Number(b.defaultSalesRepId)            : null,
         notes:                   b.notes                   ? String(b.notes).trim()                   : null,
+        acquisitionStatus:       b.acquisitionStatus       ? (b.acquisitionStatus as any)               : null,
+        leadSource:              b.leadSource              ? (b.leadSource as any)                      : null,
+        competitorName:          b.competitorName          ? String(b.competitorName).trim()           : null,
+        competitorRelationship:  b.competitorRelationship  ? (b.competitorRelationship as any)          : null,
+        estimatedAnnualSpend:    b.estimatedAnnualSpend   != null ? Number(b.estimatedAnnualSpend)     : null,
+        accountPotentialRating:  b.accountPotentialRating  ? (b.accountPotentialRating as any)          : null,
+        otherProductsNeeded:     b.otherProductsNeeded    ? String(b.otherProductsNeeded).trim()      : null,
+        currentSupplierNotes:    b.currentSupplierNotes   ? String(b.currentSupplierNotes).trim()     : null,
+        blanketPoEligible:       b.blanketPoEligible      != null ? Boolean(b.blanketPoEligible)       : false,
       },
     });
     res.status(201).json(customer);
@@ -170,6 +183,15 @@ router.put('/:id', async (req, res) => {
     if (b.defaultSalesRepId       !== undefined) d.defaultSalesRepId       = b.defaultSalesRepId != null ? Number(b.defaultSalesRepId)            : null;
     if (b.notes                   !== undefined) d.notes                   = b.notes                   ? String(b.notes).trim()                   : null;
     if (b.isActive                !== undefined) d.isActive                = Boolean(b.isActive);
+    if (b.acquisitionStatus      !== undefined) d.acquisitionStatus      = b.acquisitionStatus || null;
+    if (b.leadSource             !== undefined) d.leadSource             = b.leadSource || null;
+    if (b.competitorName         !== undefined) d.competitorName         = b.competitorName ? String(b.competitorName).trim() : null;
+    if (b.competitorRelationship !== undefined) d.competitorRelationship = b.competitorRelationship || null;
+    if (b.estimatedAnnualSpend   !== undefined) d.estimatedAnnualSpend   = b.estimatedAnnualSpend != null ? Number(b.estimatedAnnualSpend) : null;
+    if (b.accountPotentialRating !== undefined) d.accountPotentialRating  = b.accountPotentialRating || null;
+    if (b.otherProductsNeeded    !== undefined) d.otherProductsNeeded    = b.otherProductsNeeded ? String(b.otherProductsNeeded).trim() : null;
+    if (b.currentSupplierNotes   !== undefined) d.currentSupplierNotes   = b.currentSupplierNotes ? String(b.currentSupplierNotes).trim() : null;
+    if (b.blanketPoEligible      !== undefined) d.blanketPoEligible      = Boolean(b.blanketPoEligible);
 
     const customer = await prisma.customer.update({ where: { id }, data: d as any });
     res.json(customer);

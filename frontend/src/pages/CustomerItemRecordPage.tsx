@@ -13,6 +13,10 @@ interface CustomerItem {
   id: number; code: string; name: string; description?: string;
   listPrice?: number; fulfillmentPath?: string; isActive: boolean;
   customerId: number; masterSpecId?: number; variantId?: number;
+  partNumber?: string;
+  printPlateStatus?: string;
+  printPlateExpectedDate?: string;
+  printPlateRequired?: boolean;
   createdAt: string; updatedAt: string;
   customer: { id: number; code: string; name: string };
   masterSpec?: { id: number; sku: string; name: string };
@@ -24,7 +28,7 @@ interface CustomerLookup { id: number; code: string; name: string }
 interface MasterSpecLookup { id: number; sku: string; name: string }
 interface VariantLookup { id: number; sku: string; variantDescription: string; isActive: boolean }
 
-const FULFILLMENT_PATHS = ['MANUFACTURE', 'STOCK_AND_SHIP', 'OUTSOURCE', 'VIRTUAL'];
+const FULFILLMENT_PATHS = ['MANUFACTURE', 'FULFILL_FROM_STOCK', 'PURCHASE_RESELL', 'DROP_SHIP', 'CONVERT', 'SERVICE'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -70,6 +74,7 @@ export function CustomerItemRecordPage() {
   const [f, setF] = useState({
     name: '', code: '', description: '', customerId: '',
     masterSpecId: '', variantId: '', listPrice: '', fulfillmentPath: '', isActive: true,
+    partNumber: '', printPlateStatus: '', printPlateExpectedDate: '', printPlateRequired: false,
   });
 
   // Lookups
@@ -116,6 +121,10 @@ export function CustomerItemRecordPage() {
         listPrice:       r.listPrice != null ? String(r.listPrice) : '',
         fulfillmentPath: r.fulfillmentPath ?? '',
         isActive:        r.isActive,
+        partNumber: r.partNumber ?? '',
+        printPlateStatus: r.printPlateStatus ?? '',
+        printPlateExpectedDate: r.printPlateExpectedDate ? r.printPlateExpectedDate.substring(0, 10) : '',
+        printPlateRequired: r.printPlateRequired ?? false,
       });
     } catch {
       setNotFound(true);
@@ -141,6 +150,10 @@ export function CustomerItemRecordPage() {
       listPrice:       item.listPrice != null ? String(item.listPrice) : '',
       fulfillmentPath: item.fulfillmentPath ?? '',
       isActive:        item.isActive,
+      partNumber: item.partNumber ?? '',
+      printPlateStatus: item.printPlateStatus ?? '',
+      printPlateExpectedDate: item.printPlateExpectedDate ? item.printPlateExpectedDate.substring(0, 10) : '',
+      printPlateRequired: item.printPlateRequired ?? false,
     });
     setDrawerOpen(true);
   }
@@ -165,6 +178,10 @@ export function CustomerItemRecordPage() {
         listPrice:       f.listPrice ? parseFloat(f.listPrice) : null,
         fulfillmentPath: f.fulfillmentPath || null,
         isActive:        f.isActive,
+        partNumber: f.partNumber.trim() || null,
+        printPlateStatus: f.printPlateStatus || null,
+        printPlateExpectedDate: f.printPlateExpectedDate || null,
+        printPlateRequired: f.printPlateRequired,
       };
       await api.put(`/protected/customer-items/${item!.id}`, body);
       setDrawerOpen(false);
@@ -277,6 +294,18 @@ export function CustomerItemRecordPage() {
             </div>
           </div>
           <div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Part Number</div>
+            <div style={{ fontFamily: 'monospace' }}>{item.partNumber ?? '\u2014'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Print Plate Status</div>
+            <div>
+              {item.printPlateStatus ? (
+                <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: 4, background: item.printPlateStatus === 'PLATE_EXISTS' ? 'rgba(34,197,94,0.12)' : item.printPlateStatus === 'PLATE_NEEDED' ? 'rgba(245,158,11,0.12)' : item.printPlateStatus === 'PLATE_ON_ORDER' ? 'rgba(59,130,246,0.12)' : 'rgba(100,116,139,0.12)', color: item.printPlateStatus === 'PLATE_EXISTS' ? '#22c55e' : item.printPlateStatus === 'PLATE_NEEDED' ? '#f59e0b' : item.printPlateStatus === 'PLATE_ON_ORDER' ? '#60a5fa' : '#94a3b8' }}>{item.printPlateStatus.replace(/_/g, ' ')}</span>
+              ) : '\u2014'}
+            </div>
+          </div>
+          <div>
             <div style={{ fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Status</div>
             <div>{item.isActive ? 'Active' : 'Inactive'}</div>
           </div>
@@ -362,6 +391,28 @@ export function CustomerItemRecordPage() {
               <option value="">-- None --</option>
               {FULFILLMENT_PATHS.map(fp => <option key={fp} value={fp}>{fp.replace(/_/g, ' ')}</option>)}
             </select>
+          </Field>
+          <Field label="Part Number">
+            <input style={inputStyle} value={f.partNumber} onChange={set('partNumber')} />
+          </Field>
+          <Field label="Print Plate Status">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.printPlateStatus} onChange={set('printPlateStatus')}>
+              <option value="">-- None --</option>
+              {['NO_PRINT_NEEDED', 'PLATE_EXISTS', 'PLATE_NEEDED', 'PLATE_ON_ORDER'].map(s => (
+                <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+              ))}
+            </select>
+          </Field>
+          {(f.printPlateStatus === 'PLATE_NEEDED' || f.printPlateStatus === 'PLATE_ON_ORDER') && (
+            <Field label="Plate Expected Date">
+              <input style={inputStyle} type="date" value={f.printPlateExpectedDate} onChange={set('printPlateExpectedDate')} />
+            </Field>
+          )}
+          <Field label="Print Plate Required">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer', marginTop: 4 }}>
+              <input type="checkbox" checked={f.printPlateRequired} onChange={e => setF(p => ({ ...p, printPlateRequired: e.target.checked }))} />
+              Required for production
+            </label>
           </Field>
         </div>
 

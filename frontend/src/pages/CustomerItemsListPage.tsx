@@ -12,6 +12,7 @@ import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, cardStyle } from '
 interface CustomerItem {
   id: number; code: string; name: string; description?: string;
   listPrice?: number; fulfillmentPath?: string; isActive: boolean;
+  printPlateStatus?: string;
   customer: { id: number; code: string; name: string };
   masterSpec?: { id: number; sku: string; name: string };
   variant?: { id: number; sku: string; variantDescription: string };
@@ -21,11 +22,12 @@ interface CustomerLookup { id: number; code: string; name: string }
 interface MasterSpecLookup { id: number; sku: string; name: string }
 interface VariantLookup { id: number; sku: string; variantDescription: string; isActive: boolean }
 
-const FULFILLMENT_PATHS = ['MANUFACTURE', 'STOCK_AND_SHIP', 'OUTSOURCE', 'VIRTUAL'];
+const FULFILLMENT_PATHS = ['MANUFACTURE', 'FULFILL_FROM_STOCK', 'PURCHASE_RESELL', 'DROP_SHIP', 'CONVERT', 'SERVICE'];
 
 const EMPTY_FORM = {
   name: '', customerId: '', code: '', description: '',
   masterSpecId: '', variantId: '', listPrice: '', fulfillmentPath: '',
+  partNumber: '', printPlateStatus: '',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,6 +142,8 @@ export function CustomerItemsListPage() {
         variantId:       parseInt(f.variantId),
         listPrice:       f.listPrice ? parseFloat(f.listPrice) : null,
         fulfillmentPath: f.fulfillmentPath || null,
+        partNumber: f.partNumber.trim() || null,
+        printPlateStatus: f.printPlateStatus || null,
       };
       await api.post('/protected/customer-items', body);
       setDrawerOpen(false);
@@ -200,14 +204,14 @@ export function CustomerItemsListPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
-              {['Code', 'Name', 'Customer', 'Master Spec', 'Variant', 'Fulfillment', 'Price', 'Status'].map(h => (
+              {['Code', 'Name', 'Customer', 'Master Spec', 'Variant', 'Fulfillment', 'Plate', 'Price', 'Status'].map(h => (
                 <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items found.</td></tr>}
+            {loading && <tr><td colSpan={9} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={9} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items found.</td></tr>}
             {!loading && rows.map(r => (
               <tr
                 key={r.id}
@@ -224,6 +228,11 @@ export function CustomerItemsListPage() {
                 <td style={{ padding: '0.75rem 1rem' }}>
                   {r.fulfillmentPath ? (
                     <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: 4, background: 'rgba(168,85,247,0.12)', color: '#c084fc' }}>{r.fulfillmentPath.replace(/_/g, ' ')}</span>
+                  ) : '\u2014'}
+                </td>
+                <td style={{ padding: '0.75rem 1rem' }}>
+                  {r.printPlateStatus && r.printPlateStatus !== 'NO_PRINT_NEEDED' ? (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: 4, background: r.printPlateStatus === 'PLATE_EXISTS' ? 'rgba(34,197,94,0.12)' : r.printPlateStatus === 'PLATE_NEEDED' ? 'rgba(245,158,11,0.12)' : 'rgba(59,130,246,0.12)', color: r.printPlateStatus === 'PLATE_EXISTS' ? '#22c55e' : r.printPlateStatus === 'PLATE_NEEDED' ? '#f59e0b' : '#60a5fa' }}>{r.printPlateStatus.replace(/_/g, ' ')}</span>
                   ) : '\u2014'}
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, fontFamily: 'monospace' }}>
@@ -287,6 +296,17 @@ export function CustomerItemsListPage() {
             <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.fulfillmentPath} onChange={set('fulfillmentPath')}>
               <option value="">-- None --</option>
               {FULFILLMENT_PATHS.map(fp => <option key={fp} value={fp}>{fp.replace(/_/g, ' ')}</option>)}
+            </select>
+          </Field>
+          <Field label="Part Number">
+            <input style={inputStyle} value={f.partNumber} onChange={set('partNumber')} />
+          </Field>
+          <Field label="Print Plate Status">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.printPlateStatus} onChange={set('printPlateStatus')}>
+              <option value="">-- Default (No Print) --</option>
+              {['NO_PRINT_NEEDED', 'PLATE_EXISTS', 'PLATE_NEEDED', 'PLATE_ON_ORDER'].map(s => (
+                <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+              ))}
             </select>
           </Field>
         </div>

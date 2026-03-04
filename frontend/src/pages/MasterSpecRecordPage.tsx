@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { api } from '../api/client';
 import { c, inputStyle, labelStyle, btnPrimary, btnSecondary, btnDanger, cardStyle } from '../theme';
+import { FractionInput } from '../components/FractionInput';
+import { decimalToFraction } from '../utils/fractions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -210,9 +212,27 @@ export function MasterSpecRecordPage() {
 // New Master Spec Form (shown when id = 'new')
 // ─────────────────────────────────────────────────────────────────────────────
 function NewSpecForm({ categories, onCreated }: { categories: Category[]; onCreated: (s: MasterSpec) => void }) {
-  const [f, setF] = useState({ name: '', sku: '', categoryId: '', description: '' });
+  const [f, setF] = useState({ name: '', sku: '', categoryId: '', description: '', lengthInches: '', widthInches: '', heightInches: '', style: 'RSC' });
+  const [nameManual, setNameManual] = useState(false);
+  const [skuManual, setSkuManual] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+
+  // Auto-generate name from dimensions + style
+  useEffect(() => {
+    if (nameManual) return;
+    if (f.lengthInches && f.widthInches && f.heightInches) {
+      setF(p => ({ ...p, name: `${p.lengthInches} x ${p.widthInches} x ${p.heightInches} ${p.style}` }));
+    }
+  }, [f.lengthInches, f.widthInches, f.heightInches, f.style, nameManual]);
+
+  // Auto-generate SKU from dimensions + style
+  useEffect(() => {
+    if (skuManual) return;
+    if (f.lengthInches && f.widthInches && f.heightInches) {
+      setF(p => ({ ...p, sku: `BOX-${p.lengthInches}x${p.widthInches}x${p.heightInches}-${p.style}` }));
+    }
+  }, [f.lengthInches, f.widthInches, f.heightInches, f.style, skuManual]);
 
   async function save() {
     setSaving(true); setErr('');
@@ -238,10 +258,22 @@ function NewSpecForm({ categories, onCreated }: { categories: Category[]; onCrea
       <h2 style={{ margin: '0 0 1.25rem', fontSize: '1.1rem', fontWeight: 600 }}>New Master Spec</h2>
       {err && <Toast msg={err} type="error" />}
 
-      <Field label="Name *"><input style={inputStyle} value={f.name} onChange={inp('name')} placeholder="12x10x8 RSC Box" /></Field>
+      <FormGrid cols={3}>
+        <Field label="Length (in)"><FractionInput value={f.lengthInches} onChange={val => setF(p => ({ ...p, lengthInches: val }))} placeholder="12-3/8" /></Field>
+        <Field label="Width (in)"><FractionInput value={f.widthInches} onChange={val => setF(p => ({ ...p, widthInches: val }))} placeholder="10-1/2" /></Field>
+        <Field label="Height (in)"><FractionInput value={f.heightInches} onChange={val => setF(p => ({ ...p, heightInches: val }))} placeholder="8" /></Field>
+      </FormGrid>
+
+      <Field label="Box Style">
+        <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.style} onChange={inp('style')}>
+          {SELECT_OPTS.boxStyle.map(v => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </Field>
+
+      <Field label="Name *"><input style={inputStyle} value={f.name} onChange={e => { setNameManual(true); setF(p => ({ ...p, name: e.target.value })); }} placeholder="12x10x8 RSC Box" /></Field>
 
       <FormGrid cols={2}>
-        <Field label="SKU (optional, auto-generates)"><input style={inputStyle} value={f.sku} onChange={inp('sku')} placeholder="BOX-12X10X08" /></Field>
+        <Field label="SKU (optional, auto-generates)"><input style={inputStyle} value={f.sku} onChange={e => { setSkuManual(true); setF(p => ({ ...p, sku: e.target.value })); }} placeholder="BOX-12X10X08" /></Field>
         <Field label="Category">
           <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.categoryId} onChange={inp('categoryId')}>
             <option value="">&mdash; None &mdash;</option>
@@ -344,6 +376,7 @@ function BoxSpecTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: (
   const blank = { lengthInches: '', widthInches: '', heightInches: '', outsideDimensions: false, style: 'RSC', hasDieCut: false, hasPerforations: false, notes: '' };
   const [f, setF] = useState(box ? { lengthInches: box.lengthInches, widthInches: box.widthInches, heightInches: box.heightInches, outsideDimensions: box.outsideDimensions, style: box.style, hasDieCut: box.hasDieCut, hasPerforations: box.hasPerforations, notes: box.notes ?? '' } : blank);
   const [saving, setSaving] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(box ? (box.hasDieCut || box.hasPerforations) : false);
 
   async function save() {
     setSaving(true);
@@ -368,9 +401,9 @@ function BoxSpecTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: (
         <button style={btnSecondary} onClick={() => setEdit(true)}>Edit</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
-        {[['Length', box.lengthInches + '"'], ['Width', box.widthInches + '"'], ['Height', box.heightInches + '"']].map(([l,v]) => (
+        {[['Length', decimalToFraction(Number(box.lengthInches))], ['Width', decimalToFraction(Number(box.widthInches))], ['Height', decimalToFraction(Number(box.heightInches))]].map(([l,v]) => (
           <div key={l} style={{ background: c.inputBg, borderRadius: 8, padding: '0.85rem', textAlign: 'center' }}>
-            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: c.accent }}>{v}</div>
+            <div style={{ fontSize: '1.4rem', fontWeight: 700, color: c.accent }}>{v}"</div>
             <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: 2, textTransform: 'uppercase' }}>{l}</div>
           </div>
         ))}
@@ -388,9 +421,9 @@ function BoxSpecTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: (
     <div style={{ ...cardStyle, padding: '1.5rem', maxWidth: 560 }}>
       <h3 style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', fontWeight: 600 }}>{box ? 'Edit Box Spec' : 'Create Box Spec'}</h3>
       <FormGrid cols={3}>
-        <Field label="Length (in) *"><input style={inputStyle} type="number" step="0.125" value={f.lengthInches as any} onChange={e => setF(p => ({ ...p, lengthInches: e.target.value }))} /></Field>
-        <Field label="Width (in) *"><input style={inputStyle} type="number" step="0.125" value={f.widthInches as any} onChange={e => setF(p => ({ ...p, widthInches: e.target.value }))} /></Field>
-        <Field label="Height (in) *"><input style={inputStyle} type="number" step="0.125" value={f.heightInches as any} onChange={e => setF(p => ({ ...p, heightInches: e.target.value }))} /></Field>
+        <Field label="Length (in) *"><FractionInput value={f.lengthInches as string} onChange={val => setF(p => ({ ...p, lengthInches: val }))} placeholder="12-3/8" /></Field>
+        <Field label="Width (in) *"><FractionInput value={f.widthInches as string} onChange={val => setF(p => ({ ...p, widthInches: val }))} placeholder="10-1/2" /></Field>
+        <Field label="Height (in) *"><FractionInput value={f.heightInches as string} onChange={val => setF(p => ({ ...p, heightInches: val }))} placeholder="8" /></Field>
       </FormGrid>
       <FormGrid cols={2}>
         <Field label="Box Style">
@@ -400,12 +433,21 @@ function BoxSpecTab({ spec, onUpdated, flash }: { spec: MasterSpec; onUpdated: (
         </Field>
       </FormGrid>
       <div style={{ display: 'flex', gap: 20, margin: '0.25rem 0 1rem' }}>
-        {[['outsideDimensions', 'Outside dimensions'], ['hasDieCut', 'Has die cut'], ['hasPerforations', 'Has perforations']].map(([k, l]) => (
-          <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
-            <input type="checkbox" checked={(f as any)[k]} onChange={e => setF(p => ({ ...p, [k]: e.target.checked }))} /> {l}
-          </label>
-        ))}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }} title="When checked, L/W/H values represent the outside dimensions of the box rather than the inside.">
+          <input type="checkbox" checked={f.outsideDimensions} onChange={e => setF(p => ({ ...p, outsideDimensions: e.target.checked }))} /> Outside dimensions
+        </label>
       </div>
+      <div onClick={() => setShowAdvanced(s => !s)} style={{ cursor: 'pointer', color: c.accent, fontSize: '0.82rem', marginBottom: '0.75rem' }}>{showAdvanced ? '\u25be Hide' : '\u25b8 Show'} Advanced Options</div>
+      {showAdvanced && (
+        <div style={{ display: 'flex', gap: 20, margin: '0 0 1rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
+            <input type="checkbox" checked={f.hasDieCut} onChange={e => setF(p => ({ ...p, hasDieCut: e.target.checked }))} /> Has die cut
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: c.textLabel, cursor: 'pointer' }}>
+            <input type="checkbox" checked={f.hasPerforations} onChange={e => setF(p => ({ ...p, hasPerforations: e.target.checked }))} /> Has perforations
+          </label>
+        </div>
+      )}
       <Field label="Notes"><textarea style={{ ...inputStyle, height: 60, resize: 'vertical' }} value={f.notes} onChange={e => setF(p => ({ ...p, notes: e.target.value }))} /></Field>
       <div style={{ display: 'flex', gap: 8 }}>
         <button style={btnPrimary} onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
@@ -559,6 +601,7 @@ function CustomerItemsTab({ spec }: { spec: MasterSpec }) {
     <div style={{ maxWidth: 700 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <span style={{ fontSize: '0.85rem', color: c.textMuted }}>{rows.length} customer item{rows.length !== 1 ? 's' : ''} reference this master spec</span>
+        <button style={btnPrimary} onClick={() => navigate(`/customer-items/new?masterSpecId=${spec.id}`)}>+ New Customer Item</button>
       </div>
       {rows.length === 0 ? (
         <div style={{ ...cardStyle, padding: '2rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items linked to this master spec.</div>

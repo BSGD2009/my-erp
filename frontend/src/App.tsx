@@ -29,6 +29,9 @@ import { ResourceTypesPage }          from './pages/ResourceTypesPage';
 import { ProductModulesPage }         from './pages/ProductModulesPage';
 import { VariantRecordPage }         from './pages/VariantRecordPage';
 import { BoardGradesPage }           from './pages/BoardGradesPage';
+import { ProspectsListPage }         from './pages/ProspectsListPage';
+import { BlanketContractsListPage }  from './pages/BlanketContractsListPage';
+import { BlanketContractRecordPage } from './pages/BlanketContractRecordPage';
 
 function Protected({ children }: { children: React.ReactNode }) {
   return <ProtectedRoute>{children}</ProtectedRoute>;
@@ -46,6 +49,7 @@ export default function App() {
           <Route path="/dashboard"           element={<Protected><DashboardPage /></Protected>} />
           <Route path="/customers"           element={<Protected><CustomersListPage /></Protected>} />
           <Route path="/customers/:id"       element={<Protected><CustomerRecordPage /></Protected>} />
+          <Route path="/prospects"           element={<Protected><ProspectsListPage /></Protected>} />
           <Route path="/suppliers"           element={<Protected><SuppliersListPage /></Protected>} />
           <Route path="/suppliers/:id"       element={<Protected><SupplierRecordPage /></Protected>} />
           <Route path="/locations"           element={<Protected><LocationsListPage /></Protected>} />
@@ -78,6 +82,8 @@ export default function App() {
           <Route path="/admin/resource-types"    element={<Protected><ResourceTypesPage /></Protected>} />
           <Route path="/admin/product-modules"   element={<Protected><ProductModulesPage /></Protected>} />
           <Route path="/admin/board-grades"      element={<Protected><BoardGradesPage /></Protected>} />
+          <Route path="/admin/blanket-contracts" element={<Protected><BlanketContractsListPage /></Protected>} />
+          <Route path="/admin/blanket-contracts/:id" element={<Protected><BlanketContractRecordPage /></Protected>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
