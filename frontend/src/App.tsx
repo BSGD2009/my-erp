@@ -27,6 +27,8 @@ import { PaymentTermsPage }           from './pages/PaymentTermsPage';
 import { MaterialTypesPage }          from './pages/MaterialTypesPage';
 import { ResourceTypesPage }          from './pages/ResourceTypesPage';
 import { ProductModulesPage }         from './pages/ProductModulesPage';
+import { VariantRecordPage }         from './pages/VariantRecordPage';
+import { BoardGradesPage }           from './pages/BoardGradesPage';
 
 function Protected({ children }: { children: React.ReactNode }) {
   return <ProtectedRoute>{children}</ProtectedRoute>;
@@ -55,6 +57,7 @@ export default function App() {
 
           {/* Protected — products */}
           <Route path="/master-specs"        element={<Protected><MasterSpecsListPage /></Protected>} />
+          <Route path="/master-specs/:id/variants/:vid" element={<Protected><VariantRecordPage /></Protected>} />
           <Route path="/master-specs/:id"    element={<Protected><MasterSpecRecordPage /></Protected>} />
           <Route path="/customer-items"      element={<Protected><CustomerItemsListPage /></Protected>} />
           <Route path="/customer-items/:id"  element={<Protected><CustomerItemRecordPage /></Protected>} />
@@ -74,6 +77,7 @@ export default function App() {
           <Route path="/admin/material-types"    element={<Protected><MaterialTypesPage /></Protected>} />
           <Route path="/admin/resource-types"    element={<Protected><ResourceTypesPage /></Protected>} />
           <Route path="/admin/product-modules"   element={<Protected><ProductModulesPage /></Protected>} />
+          <Route path="/admin/board-grades"      element={<Protected><BoardGradesPage /></Protected>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

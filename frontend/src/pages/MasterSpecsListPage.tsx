@@ -12,7 +12,7 @@ interface MasterSpec {
   id: number; sku: string; name: string; description?: string;
   isActive: boolean;
   category?: { id: number; name: string; module?: { id: number; moduleKey: string; moduleName: string } };
-  _count: { variants: number; bomLines: number; customerItems: number };
+  _count: { variants: number; customerItems: number };
 }
 
 interface Category { id: number; name: string }
@@ -179,7 +179,7 @@ export function MasterSpecsListPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
-              {['SKU', 'Name', 'Category', 'Variants', 'BOM Lines', 'Customer Items', 'Status'].map(h => (
+              {['SKU', 'Name', 'Category', 'Variants', 'Customer Items', 'Status'].map(h => (
                 <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                   {h}
                 </th>
@@ -188,10 +188,10 @@ export function MasterSpecsListPage() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>
+              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>
             )}
             {!loading && specs.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>
+              <tr><td colSpan={6} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>
                 {search || categoryFilter ? 'No master specs match your filters.' : 'No master specs yet. Create the first one.'}
               </td></tr>
             )}
@@ -214,9 +214,6 @@ export function MasterSpecsListPage() {
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>
                   {s._count.variants > 0 ? s._count.variants : '\u2014'}
-                </td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>
-                  {s._count.bomLines > 0 ? s._count.bomLines : '\u2014'}
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel, textAlign: 'center' }}>
                   {s._count.customerItems > 0 ? s._count.customerItems : '\u2014'}

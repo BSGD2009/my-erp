@@ -55,7 +55,7 @@ router.get('/', async (req, res) => {
       take: limitNum,
       include: {
         category: { select: { id: true, name: true, module: { select: { id: true, moduleKey: true, moduleName: true } } } },
-        _count:   { select: { variants: true, bomLines: true, customerItems: true } },
+        _count:   { select: { variants: true, customerItems: true } },
       },
     }),
     prisma.masterSpec.count({ where }),
@@ -73,22 +73,28 @@ router.get('/:id', async (req, res) => {
     include: {
       category:  { select: { id: true, name: true, module: { select: { id: true, moduleKey: true, moduleName: true } } } },
       boxSpec:   true,
-      blankSpec: {
-        include: {
-          material:        { select: { id: true, code: true, name: true, unitOfMeasure: true } },
-          requiredDie:     { select: { id: true, toolNumber: true, type: true, condition: true } },
-          materialVariant: { select: { id: true, variantCode: true, description: true, rollWidth: true, sheetLength: true, sheetWidth: true } },
-        },
-      },
-      bomLines: {
-        include: {
-          material: { select: { id: true, code: true, name: true, unitOfMeasure: true } },
-        },
-        orderBy: { material: { name: 'asc' } },
-      },
       variants: {
         where: { isActive: true },
         orderBy: { sku: 'asc' },
+        include: {
+          boardGrade: { select: { id: true, gradeCode: true, gradeName: true, wallType: true, nominalCaliper: true } },
+          blankSpec: {
+            include: {
+              material:        { select: { id: true, code: true, name: true, unitOfMeasure: true } },
+              requiredDie:     { select: { id: true, toolNumber: true, type: true, condition: true } },
+              materialVariant: { select: { id: true, variantCode: true, description: true, rollWidth: true, sheetLength: true, sheetWidth: true } },
+            },
+          },
+          bomLines: {
+            include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
+            orderBy: { material: { name: 'asc' } },
+          },
+          customerItems: {
+            where: { isActive: true },
+            include: { customer: { select: { id: true, code: true, name: true } } },
+            orderBy: { customer: { name: 'asc' } },
+          },
+        },
       },
       specs: {
         orderBy: [{ sortOrder: 'asc' }, { specKey: 'asc' }],
@@ -221,7 +227,7 @@ router.post('/:id/variants', async (req, res) => {
   if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
 
   const { sku, variantDescription, width, length, thickness,
-          bundleQty, caseQty, listPrice } = req.body as Record<string, unknown>;
+          bundleQty, caseQty, listPrice, boardGradeId, flute, caliper } = req.body as Record<string, unknown>;
 
   if (!String(sku ?? '').trim()) { res.status(400).json({ error: 'sku is required' }); return; }
 
@@ -235,6 +241,9 @@ router.post('/:id/variants', async (req, res) => {
         masterSpecId,
         sku:               String(sku).trim().toUpperCase(),
         variantDescription: variantDescription != null ? String(variantDescription).trim() : null,
+        boardGradeId: boardGradeId != null ? Number(boardGradeId) : null,
+        flute:        flute        != null ? String(flute).trim()  : null,
+        caliper:      caliper      != null ? (caliper as string | number) : null,
         width:             width     != null ? (width     as string | number) : null,
         length:            length    != null ? (length    as string | number) : null,
         thickness:         thickness != null ? (thickness as string | number) : null,
@@ -256,11 +265,14 @@ router.put('/:id/variants/:vid', async (req, res) => {
   if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { sku, variantDescription, width, length, thickness,
-          bundleQty, caseQty, listPrice, isActive } = req.body as Record<string, unknown>;
+          bundleQty, caseQty, listPrice, isActive, boardGradeId, flute, caliper } = req.body as Record<string, unknown>;
 
   const d: Record<string, unknown> = {};
   if (sku                !== undefined) d.sku                = String(sku).trim().toUpperCase();
   if (variantDescription !== undefined) d.variantDescription = variantDescription != null ? String(variantDescription).trim() : null;
+  if (boardGradeId       !== undefined) d.boardGradeId = boardGradeId != null ? Number(boardGradeId) : null;
+  if (flute              !== undefined) d.flute        = flute        != null ? String(flute).trim()  : null;
+  if (caliper            !== undefined) d.caliper      = caliper      != null ? (caliper as string | number) : null;
   if (width              !== undefined) d.width              = width     != null ? (width     as string | number) : null;
   if (length             !== undefined) d.length             = length    != null ? (length    as string | number) : null;
   if (thickness          !== undefined) d.thickness          = thickness != null ? (thickness as string | number) : null;
@@ -296,6 +308,39 @@ router.delete('/:id/variants/:vid', async (req, res) => {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Variant not found' }); return; }
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// GET single variant with full details
+router.get('/:id/variants/:vid', async (req, res) => {
+  const masterSpecId = parseInt(req.params.id);
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+
+  const variant = await prisma.productVariant.findFirst({
+    where: { id: variantId, masterSpecId },
+    include: {
+      masterSpec: { select: { id: true, sku: true, name: true } },
+      boardGrade: { select: { id: true, gradeCode: true, gradeName: true, wallType: true, nominalCaliper: true } },
+      blankSpec: {
+        include: {
+          material:        { select: { id: true, code: true, name: true, unitOfMeasure: true } },
+          requiredDie:     { select: { id: true, toolNumber: true, type: true, condition: true } },
+          materialVariant: { select: { id: true, variantCode: true, description: true, rollWidth: true, sheetLength: true, sheetWidth: true } },
+        },
+      },
+      bomLines: {
+        include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
+        orderBy: { material: { name: 'asc' } },
+      },
+      customerItems: {
+        where: { isActive: true },
+        include: { customer: { select: { id: true, code: true, name: true } } },
+        orderBy: { customer: { name: 'asc' } },
+      },
+    },
+  });
+  if (!variant) { res.status(404).json({ error: 'Variant not found' }); return; }
+  res.json(variant);
 });
 
 // =============================================================================
@@ -376,42 +421,39 @@ router.delete('/:id/specs/:sid', async (req, res) => {
 });
 
 // =============================================================================
-// BOM LINES  /api/protected/master-specs/:id/bom
+// BOM LINES  /api/protected/master-specs/:id/variants/:vid/bom
 // =============================================================================
 
-router.get('/:id/bom', async (req, res) => {
-  const masterSpecId = parseInt(req.params.id);
-  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
+router.get('/:id/variants/:vid/bom', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(variantId)) { res.status(400).json({ error: 'Invalid variant ID' }); return; }
   const lines = await prisma.bOMLine.findMany({
-    where: { masterSpecId },
-    include: {
-      material: {
-        select: { id: true, code: true, name: true, unitOfMeasure: true },
-      },
-    },
+    where: { variantId },
+    include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
     orderBy: { material: { name: 'asc' } },
   });
   res.json(lines);
 });
 
-router.post('/:id/bom', async (req, res) => {
+router.post('/:id/variants/:vid/bom', async (req, res) => {
   const masterSpecId = parseInt(req.params.id);
-  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { materialId, quantityPer, unitOfMeasure } = req.body as Record<string, unknown>;
   if (!materialId)                      { res.status(400).json({ error: 'materialId is required' });    return; }
   if (quantityPer == null)              { res.status(400).json({ error: 'quantityPer is required' });   return; }
   if (!String(unitOfMeasure ?? '').trim()) { res.status(400).json({ error: 'unitOfMeasure is required' }); return; }
 
-  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
-  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
+  const variant = await prisma.productVariant.findFirst({ where: { id: variantId, masterSpecId }, select: { id: true } });
+  if (!variant) { res.status(404).json({ error: 'Variant not found' }); return; }
 
   try {
     const line = await prisma.bOMLine.create({
       data: {
-        masterSpecId,
-        materialId:   Number(materialId),
-        quantityPer:  quantityPer as string | number,
+        variantId,
+        materialId:    Number(materialId),
+        quantityPer:   quantityPer as string | number,
         unitOfMeasure: String(unitOfMeasure).trim(),
       },
       include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
@@ -424,10 +466,10 @@ router.post('/:id/bom', async (req, res) => {
   }
 });
 
-router.put('/:id/bom/:bid', async (req, res) => {
-  const masterSpecId = parseInt(req.params.id);
+router.put('/:id/variants/:vid/bom/:bid', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
   const bomId     = parseInt(req.params.bid);
-  if (isNaN(masterSpecId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(variantId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const { quantityPer, unitOfMeasure } = req.body as Record<string, unknown>;
   const d: Record<string, unknown> = {};
@@ -436,7 +478,7 @@ router.put('/:id/bom/:bid', async (req, res) => {
 
   try {
     const line = await prisma.bOMLine.update({
-      where: { id: bomId, masterSpecId },
+      where: { id: bomId, variantId },
       data:  d as any,
       include: { material: { select: { id: true, code: true, name: true, unitOfMeasure: true } } },
     });
@@ -447,12 +489,12 @@ router.put('/:id/bom/:bid', async (req, res) => {
   }
 });
 
-router.delete('/:id/bom/:bid', async (req, res) => {
-  const masterSpecId = parseInt(req.params.id);
+router.delete('/:id/variants/:vid/bom/:bid', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
   const bomId     = parseInt(req.params.bid);
-  if (isNaN(masterSpecId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
+  if (isNaN(variantId) || isNaN(bomId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
   try {
-    await prisma.bOMLine.delete({ where: { id: bomId, masterSpecId } });
+    await prisma.bOMLine.delete({ where: { id: bomId, variantId } });
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'BOM line not found' }); return; }
@@ -558,7 +600,7 @@ router.delete('/:id/box-spec', async (req, res) => {
 });
 
 // =============================================================================
-// BLANK SPEC  /api/protected/master-specs/:id/blank-spec
+// BLANK SPEC  /api/protected/master-specs/:id/variants/:vid/blank-spec
 // =============================================================================
 
 function validateBlankSpecBody(body: Record<string, unknown>, isCreate: boolean): string | null {
@@ -633,29 +675,29 @@ const BLANK_SPEC_INCLUDE = {
   materialVariant: { select: { id: true, variantCode: true, description: true, rollWidth: true, sheetLength: true, sheetWidth: true } },
 };
 
-router.get('/:id/blank-spec', async (req, res) => {
-  const masterSpecId = parseInt(req.params.id);
-  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
+router.get('/:id/variants/:vid/blank-spec', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(variantId)) { res.status(400).json({ error: 'Invalid variant ID' }); return; }
 
-  const spec = await prisma.blankSpec.findUnique({ where: { masterSpecId }, include: BLANK_SPEC_INCLUDE });
-  if (!spec) { res.status(404).json({ error: 'No blank spec for this master spec' }); return; }
+  const spec = await prisma.blankSpec.findUnique({ where: { variantId }, include: BLANK_SPEC_INCLUDE });
+  if (!spec) { res.status(404).json({ error: 'No blank spec for this variant' }); return; }
   res.json(spec);
 });
 
-router.post('/:id/blank-spec', async (req, res) => {
+router.post('/:id/variants/:vid/blank-spec', async (req, res) => {
   const masterSpecId = parseInt(req.params.id);
-  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(masterSpecId) || isNaN(variantId)) { res.status(400).json({ error: 'Invalid ID' }); return; }
 
   const body = req.body as Record<string, unknown>;
   const err  = validateBlankSpecBody(body, true);
   if (err) { res.status(400).json({ error: err }); return; }
 
-  const masterSpec = await prisma.masterSpec.findUnique({ where: { id: masterSpecId }, select: { id: true } });
-  if (!masterSpec) { res.status(404).json({ error: 'Master spec not found' }); return; }
+  const variant = await prisma.productVariant.findFirst({ where: { id: variantId, masterSpecId }, select: { id: true } });
+  if (!variant) { res.status(404).json({ error: 'Variant not found' }); return; }
 
   const data = buildBlankSpecData(body);
-  // Required defaults for create
-  data.masterSpecId   = masterSpecId;
+  data.variantId = variantId;
   if (!data.grainDirection) data.grainDirection = 'LONG_GRAIN';
   if (!data.flute)          data.flute          = 'C';
   if (!data.wallType)       data.wallType       = 'SINGLE';
@@ -673,11 +715,11 @@ router.post('/:id/blank-spec', async (req, res) => {
   }
 });
 
-router.put('/:id/blank-spec', async (req, res) => {
-  const masterSpecId = parseInt(req.params.id);
-  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
+router.put('/:id/variants/:vid/blank-spec', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(variantId)) { res.status(400).json({ error: 'Invalid variant ID' }); return; }
 
-  if (!await prisma.blankSpec.findUnique({ where: { masterSpecId } })) {
+  if (!await prisma.blankSpec.findUnique({ where: { variantId } })) {
     res.status(404).json({ error: 'No blank spec found — use POST to create one' }); return;
   }
 
@@ -688,7 +730,7 @@ router.put('/:id/blank-spec', async (req, res) => {
   const data = buildBlankSpecData(body);
 
   try {
-    const spec = await prisma.blankSpec.update({ where: { masterSpecId }, data: data as any, include: BLANK_SPEC_INCLUDE });
+    const spec = await prisma.blankSpec.update({ where: { variantId }, data: data as any, include: BLANK_SPEC_INCLUDE });
     res.json(spec);
   } catch (e: any) {
     if (e.code === 'P2003') { res.status(400).json({ error: 'Referenced material, die, or variant not found' }); return; }
@@ -696,11 +738,11 @@ router.put('/:id/blank-spec', async (req, res) => {
   }
 });
 
-router.delete('/:id/blank-spec', async (req, res) => {
-  const masterSpecId = parseInt(req.params.id);
-  if (isNaN(masterSpecId)) { res.status(400).json({ error: 'Invalid master spec ID' }); return; }
+router.delete('/:id/variants/:vid/blank-spec', async (req, res) => {
+  const variantId = parseInt(req.params.vid);
+  if (isNaN(variantId)) { res.status(400).json({ error: 'Invalid variant ID' }); return; }
   try {
-    await prisma.blankSpec.delete({ where: { masterSpecId } });
+    await prisma.blankSpec.delete({ where: { variantId } });
     res.status(204).send();
   } catch (err: any) {
     if (err.code === 'P2025') { res.status(404).json({ error: 'Blank spec not found' }); return; }

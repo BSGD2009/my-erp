@@ -21,6 +21,7 @@ import resourceTypesRouter     from './routes/resourceTypes';
 import resourcesRouter         from './routes/resources';
 import operationsRouter        from './routes/operations';
 import productModulesRouter    from './routes/productModules';
+import boardGradesRouter       from './routes/boardGrades';
 import partiesRouter           from './routes/parties';
 
 dotenv.config();
@@ -75,6 +76,7 @@ app.use('/api/protected/payment-terms',      paymentTermsRouter);
 app.use('/api/protected/material-types',     materialTypesRouter);
 app.use('/api/protected/resource-types',     resourceTypesRouter);
 app.use('/api/protected/product-modules',    productModulesRouter);
+app.use('/api/protected/board-grades',      boardGradesRouter);
 
 // ── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

@@ -50,6 +50,7 @@ router.get('/', async (req, res) => {
       include: {
         customer:   { select: { id: true, code: true, name: true } },
         masterSpec: { select: { id: true, sku: true, name: true } },
+        variant:    { select: { id: true, sku: true, variantDescription: true } },
       },
     }),
     prisma.customerItem.count({ where }),
@@ -85,6 +86,14 @@ router.post('/', async (req, res) => {
 
   if (!String(name       ?? '').trim()) { res.status(400).json({ error: 'name is required' });       return; }
   if (customerId == null)               { res.status(400).json({ error: 'customerId is required' }); return; }
+  if (variantId == null)                { res.status(400).json({ error: 'variantId is required' });  return; }
+
+  // Validate variant exists and belongs to masterSpec if provided
+  const variant = await prisma.productVariant.findUnique({ where: { id: Number(variantId) }, select: { id: true, masterSpecId: true } });
+  if (!variant) { res.status(400).json({ error: 'Variant not found' }); return; }
+  if (masterSpecId != null && variant.masterSpecId !== Number(masterSpecId)) {
+    res.status(400).json({ error: 'Variant does not belong to the specified master spec' }); return;
+  }
 
   if (fulfillmentPath !== undefined && !VALID_FULFILLMENT_PATHS.includes(fulfillmentPath as FulfillmentPath)) {
     res.status(400).json({ error: `fulfillmentPath must be one of: ${VALID_FULFILLMENT_PATHS.join(', ')}` }); return;
@@ -102,7 +111,7 @@ router.post('/', async (req, res) => {
         description:     description     != null ? String(description).trim()     : null,
         customerId:      Number(customerId),
         masterSpecId:    masterSpecId    != null ? Number(masterSpecId)            : null,
-        variantId:       variantId       != null ? Number(variantId)              : null,
+        variantId:       Number(variantId),
         listPrice:       listPrice       != null ? (listPrice as string | number) : null,
         fulfillmentPath: (fulfillmentPath as FulfillmentPath | undefined) ?? 'MANUFACTURE',
       },
@@ -132,13 +141,24 @@ router.put('/:id', async (req, res) => {
     res.status(400).json({ error: `fulfillmentPath must be one of: ${VALID_FULFILLMENT_PATHS.join(', ')}` }); return;
   }
 
+  // Validate variant-masterSpec consistency if changing either
+  if (variantId !== undefined) {
+    const vId = Number(variantId);
+    const v = await prisma.productVariant.findUnique({ where: { id: vId }, select: { masterSpecId: true } });
+    if (!v) { res.status(400).json({ error: 'Variant not found' }); return; }
+    const msId = masterSpecId !== undefined ? (masterSpecId != null ? Number(masterSpecId) : null) : undefined;
+    if (msId != null && v.masterSpecId !== msId) {
+      res.status(400).json({ error: 'Variant does not belong to the specified master spec' }); return;
+    }
+  }
+
   const d: Record<string, unknown> = {};
   if (code            !== undefined) d.code            = String(code).trim().toUpperCase();
   if (name            !== undefined) d.name            = String(name).trim();
   if (description     !== undefined) d.description     = description     != null ? String(description).trim()     : null;
   if (customerId      !== undefined) d.customerId      = Number(customerId);
   if (masterSpecId    !== undefined) d.masterSpecId    = masterSpecId    != null ? Number(masterSpecId)            : null;
-  if (variantId       !== undefined) d.variantId       = variantId       != null ? Number(variantId)              : null;
+  if (variantId       !== undefined) d.variantId       = Number(variantId);
   if (listPrice       !== undefined) d.listPrice       = listPrice       != null ? (listPrice as string | number) : null;
   if (fulfillmentPath !== undefined) d.fulfillmentPath = fulfillmentPath as FulfillmentPath;
   if (isActive        !== undefined) d.isActive        = Boolean(isActive);

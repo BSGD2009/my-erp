@@ -46,6 +46,7 @@ const NAV_SECTIONS = [
       { path: '/admin/material-types',   label: 'Material Types' },
       { path: '/admin/resource-types',   label: 'Resource Types' },
       { path: '/admin/product-modules',  label: 'Product Modules' },
+      { path: '/admin/board-grades',    label: 'Board Grades' },
     ],
   },
 ];

@@ -12,7 +12,7 @@ interface Tool {
   location:  { id: number; name: string };
   customerItem?: { id: number; code: string; name: string };
   masterSpec?: { id: number; sku: string; name: string };
-  blankSpecs: Array<{ id: number; masterSpec?: { id: number; sku: string; name: string } }>;
+  blankSpecs: Array<{ id: number; variant?: { id: number; sku: string; variantDescription?: string; masterSpec: { id: number; sku: string; name: string } } }>;
 }
 interface Location { id: number; name: string }
 interface Customer { id: number; code: string; name: string }
@@ -198,21 +198,21 @@ export function ToolingRecordPage() {
       {/* Products using this tool */}
       {tool && tool.blankSpecs.length > 0 && (
         <div style={{ marginTop:'1.5rem', maxWidth:640 }}>
-          <div style={{ fontSize:'0.72rem', fontWeight:700, color:c.textMuted, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:'0.85rem' }}>Master Specs Using This Tool</div>
+          <div style={{ fontSize:'0.72rem', fontWeight:700, color:c.textMuted, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:'0.85rem' }}>Variants Using This Tool</div>
           <div style={{ ...cardStyle, overflow:'hidden' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ borderBottom:`1px solid ${c.cardBorder}` }}>
-                  {['SKU','Master Spec'].map(h => <th key={h} style={{ padding:'0.65rem 1rem', textAlign:'left', fontSize:'0.7rem', fontWeight:600, color:c.textMuted, textTransform:'uppercase', letterSpacing:'0.05em' }}>{h}</th>)}
+                  {['Variant SKU','Master Spec'].map(h => <th key={h} style={{ padding:'0.65rem 1rem', textAlign:'left', fontSize:'0.7rem', fontWeight:600, color:c.textMuted, textTransform:'uppercase', letterSpacing:'0.05em' }}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {tool.blankSpecs.filter(bs => bs.masterSpec).map(bs => (
-                  <tr key={bs.id} onClick={() => navigate(`/master-specs/${bs.masterSpec!.id}`)} style={{ borderBottom:`1px solid ${c.divider}`, cursor:'pointer', transition:'background 0.1s' }}
+                {tool.blankSpecs.filter(bs => bs.variant).map(bs => (
+                  <tr key={bs.id} onClick={() => navigate(`/master-specs/${bs.variant!.masterSpec.id}/variants/${bs.variant!.id}`)} style={{ borderBottom:`1px solid ${c.divider}`, cursor:'pointer', transition:'background 0.1s' }}
                     onMouseEnter={e => (e.currentTarget.style.background = c.rowHover)}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                    <td style={{ padding:'0.65rem 1rem', fontFamily:'monospace', fontSize:'0.82rem', color:c.accent }}>{bs.masterSpec!.sku}</td>
-                    <td style={{ padding:'0.65rem 1rem', fontSize:'0.875rem' }}>{bs.masterSpec!.name}</td>
+                    <td style={{ padding:'0.65rem 1rem', fontFamily:'monospace', fontSize:'0.82rem', color:c.accent }}>{bs.variant!.sku}</td>
+                    <td style={{ padding:'0.65rem 1rem', fontSize:'0.875rem' }}>{bs.variant!.masterSpec.name}</td>
                   </tr>
                 ))}
               </tbody>

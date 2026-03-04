@@ -114,6 +114,37 @@ async function main() {
 
   console.log('  Product Modules: 5 modules seeded')
 
+  // ── Board Grades ──────────────────────────────────────────────────────────
+
+  const boardGrades = [
+    { gradeCode: '125LB',   gradeName: '125# Test',  wallType: 'SW', nominalCaliper: 0.118, sortOrder: 1 },
+    { gradeCode: '200LB',   gradeName: '200# Test',  wallType: 'SW', nominalCaliper: 0.140, sortOrder: 2 },
+    { gradeCode: '275LB',   gradeName: '275# Test',  wallType: 'SW', nominalCaliper: 0.175, sortOrder: 3 },
+    { gradeCode: '32ECT',   gradeName: '32 ECT',     wallType: 'SW', nominalCaliper: 0.140, sortOrder: 4 },
+    { gradeCode: '40ECT',   gradeName: '40 ECT',     wallType: 'SW', nominalCaliper: 0.155, sortOrder: 5 },
+    { gradeCode: '44ECT',   gradeName: '44 ECT',     wallType: 'SW', nominalCaliper: 0.172, sortOrder: 6 },
+    { gradeCode: 'NONTEST', gradeName: 'Non-Test DW', wallType: 'DW', nominalCaliper: 0.225, sortOrder: 7 },
+    { gradeCode: '275DW',   gradeName: '275# DW',    wallType: 'DW', nominalCaliper: 0.250, sortOrder: 8 },
+    { gradeCode: '350LB',   gradeName: '350# Test',  wallType: 'DW', nominalCaliper: 0.250, sortOrder: 9 },
+    { gradeCode: '400LB',   gradeName: '400# Test',  wallType: 'DW', nominalCaliper: 0.300, sortOrder: 10 },
+    { gradeCode: '450LB',   gradeName: '450# Test',  wallType: 'DW', nominalCaliper: 0.350, sortOrder: 11 },
+    { gradeCode: '48ECT',   gradeName: '48 ECT',     wallType: 'DW', nominalCaliper: 0.275, sortOrder: 12 },
+    { gradeCode: '51ECT',   gradeName: '51 ECT',     wallType: 'DW', nominalCaliper: 0.300, sortOrder: 13 },
+    { gradeCode: '61ECT',   gradeName: '61 ECT',     wallType: 'DW', nominalCaliper: 0.350, sortOrder: 14 },
+    { gradeCode: '71ECT',   gradeName: '71 ECT',     wallType: 'DW', nominalCaliper: 0.400, sortOrder: 15 },
+  ]
+
+  const bg32ECT = await prisma.boardGrade.upsert({
+    where: { gradeCode: '32ECT' }, update: {},
+    create: boardGrades.find(g => g.gradeCode === '32ECT')!,
+  })
+
+  for (const g of boardGrades.filter(g => g.gradeCode !== '32ECT')) {
+    await prisma.boardGrade.upsert({ where: { gradeCode: g.gradeCode }, update: {}, create: g })
+  }
+
+  console.log('  Board Grades: 15 grades seeded')
+
   // ── Module Spec Fields (corrugated box dynamic specs) ───────────────────
 
   const specFields = [
@@ -458,8 +489,8 @@ async function main() {
   // ── Master Specs (was Products) ─────────────────────────────────────────
 
   const box12x10x8 = await prisma.masterSpec.upsert({
-    where: { sku: 'BOX-12x10x8-RSC-B' }, update: {},
-    create: { sku: 'BOX-12x10x8-RSC-B', name: '12x10x8 RSC B-Flute Box', description: 'Standard regular slotted container, B-flute, 32 ECT, plain kraft', categoryId: catRSC.id, listPrice: 1.85 },
+    where: { sku: 'BOX-12x10x8-RSC' }, update: {},
+    create: { sku: 'BOX-12x10x8-RSC', name: '12x10x8 RSC Box', description: 'Standard regular slotted container, plain kraft', categoryId: catRSC.id, listPrice: 1.85 },
   })
 
   const existingBoxSpec = await prisma.boxSpec.findUnique({ where: { masterSpecId: box12x10x8.id } })
@@ -469,11 +500,21 @@ async function main() {
     })
   }
 
-  const existingBlankSpec = await prisma.blankSpec.findUnique({ where: { masterSpecId: box12x10x8.id } })
+  // Variant: 32 ECT B-Flute
+  const variant32B = await prisma.productVariant.upsert({
+    where: { sku: 'BOX-12x10x8-RSC-32ECT-B' }, update: {},
+    create: {
+      masterSpecId: box12x10x8.id, sku: 'BOX-12x10x8-RSC-32ECT-B',
+      variantDescription: '32 ECT B-Flute',
+      boardGradeId: bg32ECT.id, flute: 'B', caliper: 0.140,
+    },
+  })
+
+  const existingBlankSpec = await prisma.blankSpec.findUnique({ where: { variantId: variant32B.id } })
   if (!existingBlankSpec) {
     await prisma.blankSpec.create({
       data: {
-        masterSpecId: box12x10x8.id, materialId: matBoardB.id,
+        variantId: variant32B.id, materialId: matBoardB.id,
         blankLengthInches: 45.25, blankWidthInches: 24.5,
         grainDirection: GrainDirection.LONG_GRAIN, boardGrade: '32 ECT',
         flute: Flute.B, wallType: WallType.SINGLE,
@@ -489,9 +530,9 @@ async function main() {
   }
 
   await prisma.bOMLine.upsert({
-    where: { masterSpecId_materialId: { masterSpecId: box12x10x8.id, materialId: matAdhesive.id } },
+    where: { variantId_materialId: { variantId: variant32B.id, materialId: matAdhesive.id } },
     update: {},
-    create: { masterSpecId: box12x10x8.id, materialId: matAdhesive.id, quantityPer: 0.01, unitOfMeasure: 'lbs' },
+    create: { variantId: variant32B.id, materialId: matAdhesive.id, quantityPer: 0.01, unitOfMeasure: 'lbs' },
   })
 
   await prisma.masterSpec.upsert({
@@ -499,7 +540,7 @@ async function main() {
     create: { sku: 'TAPE-2IN-CLR-36YD', name: '2" Clear Carton Tape — 36yd Roll', description: 'Standard 2" clear polypropylene carton sealing tape', categoryId: catSupplies.id, listPrice: 2.50 },
   })
 
-  console.log('  Master Specs: 2 specs with box spec, blank spec, and BOM')
+  console.log('  Master Specs: 2 specs with box spec, variant, blank spec, and BOM')
 
   // ── Customer Items ─────────────────────────────────────────────────────
 
@@ -507,7 +548,7 @@ async function main() {
     where: { code: 'ACME-BOX-001' }, update: {},
     create: {
       code: 'ACME-BOX-001', name: 'Acme Standard Shipping Box',
-      customerId: acme.id, masterSpecId: box12x10x8.id,
+      customerId: acme.id, masterSpecId: box12x10x8.id, variantId: variant32B.id,
       listPrice: 1.95, fulfillmentPath: FulfillmentPath.MANUFACTURE,
     },
   })

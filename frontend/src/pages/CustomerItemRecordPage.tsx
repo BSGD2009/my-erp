@@ -22,6 +22,7 @@ interface CustomerItem {
 
 interface CustomerLookup { id: number; code: string; name: string }
 interface MasterSpecLookup { id: number; sku: string; name: string }
+interface VariantLookup { id: number; sku: string; variantDescription: string; isActive: boolean }
 
 const FULFILLMENT_PATHS = ['MANUFACTURE', 'STOCK_AND_SHIP', 'OUTSOURCE', 'VIRTUAL'];
 
@@ -74,11 +75,23 @@ export function CustomerItemRecordPage() {
   // Lookups
   const [customers, setCustomers]     = useState<CustomerLookup[]>([]);
   const [masterSpecs, setMasterSpecs] = useState<MasterSpecLookup[]>([]);
+  const [variants, setVariants]       = useState<VariantLookup[]>([]);
+  const [loadingVariants, setLoadingVariants] = useState(false);
 
   useEffect(() => {
     api.get<{ data: CustomerLookup[] }>('/protected/customers?limit=500').then(r => setCustomers(r.data)).catch(() => {});
     api.get<{ data: MasterSpecLookup[] }>('/protected/master-specs?limit=500').then(r => setMasterSpecs(r.data)).catch(() => {});
   }, []);
+
+  // Fetch variants when masterSpecId changes in the form
+  useEffect(() => {
+    if (!f.masterSpecId) { setVariants([]); return; }
+    setLoadingVariants(true);
+    api.get<{ id: number; variants: VariantLookup[] }>(`/protected/master-specs/${f.masterSpecId}`)
+      .then(r => setVariants(r.variants ?? []))
+      .catch(() => setVariants([]))
+      .finally(() => setLoadingVariants(false));
+  }, [f.masterSpecId]);
 
   function flash(text: string, type: 'success' | 'error' = 'success') {
     setMsg({ text, type });
@@ -136,8 +149,10 @@ export function CustomerItemRecordPage() {
     setF(prev => ({ ...prev, [k]: e.target.value }));
 
   async function save() {
-    if (!f.name.trim())  { setSaveErr('Name is required'); return; }
-    if (!f.customerId)   { setSaveErr('Customer is required'); return; }
+    if (!f.name.trim())    { setSaveErr('Name is required'); return; }
+    if (!f.customerId)     { setSaveErr('Customer is required'); return; }
+    if (!f.masterSpecId)   { setSaveErr('Master Spec is required'); return; }
+    if (!f.variantId)      { setSaveErr('Variant is required'); return; }
     setSaving(true); setSaveErr('');
     try {
       const body: Record<string, unknown> = {
@@ -243,7 +258,11 @@ export function CustomerItemRecordPage() {
           </div>
           <div>
             <div style={{ fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Variant</div>
-            <div>{item.variant ? item.variant.name : '\u2014'}</div>
+            <div>
+              {item.variant && item.masterSpecId ? (
+                <span style={{ cursor: 'pointer', color: c.accent }} onClick={() => navigate(`/master-specs/${item.masterSpecId}/variants/${item.variant!.id}`)}>{item.variant.sku}</span>
+              ) : '\u2014'}
+            </div>
           </div>
           <div>
             <div style={{ fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>List Price</div>
@@ -323,10 +342,16 @@ export function CustomerItemRecordPage() {
               {customers.map(cu => <option key={cu.id} value={cu.id}>{cu.name}</option>)}
             </select>
           </Field>
-          <Field label="Master Spec">
-            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.masterSpecId} onChange={set('masterSpecId')}>
-              <option value="">-- None --</option>
+          <Field label="Master Spec *">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.masterSpecId} onChange={e => setF(prev => ({ ...prev, masterSpecId: e.target.value, variantId: '' }))}>
+              <option value="">-- Select master spec --</option>
               {masterSpecs.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Variant *">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.variantId} onChange={set('variantId')} disabled={!f.masterSpecId || loadingVariants}>
+              <option value="">{!f.masterSpecId ? '-- Select master spec first --' : loadingVariants ? 'Loading...' : '-- Select variant --'}</option>
+              {variants.filter(v => v.isActive).map(v => <option key={v.id} value={v.id}>{v.sku}{v.variantDescription ? ` — ${v.variantDescription}` : ''}</option>)}
             </select>
           </Field>
           <Field label="List Price ($)">

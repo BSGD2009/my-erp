@@ -14,16 +14,18 @@ interface CustomerItem {
   listPrice?: number; fulfillmentPath?: string; isActive: boolean;
   customer: { id: number; code: string; name: string };
   masterSpec?: { id: number; sku: string; name: string };
+  variant?: { id: number; sku: string; variantDescription: string };
 }
 
 interface CustomerLookup { id: number; code: string; name: string }
 interface MasterSpecLookup { id: number; sku: string; name: string }
+interface VariantLookup { id: number; sku: string; variantDescription: string; isActive: boolean }
 
 const FULFILLMENT_PATHS = ['MANUFACTURE', 'STOCK_AND_SHIP', 'OUTSOURCE', 'VIRTUAL'];
 
 const EMPTY_FORM = {
   name: '', customerId: '', code: '', description: '',
-  masterSpecId: '', listPrice: '', fulfillmentPath: '',
+  masterSpecId: '', variantId: '', listPrice: '', fulfillmentPath: '',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,12 +79,24 @@ export function CustomerItemsListPage() {
   // Lookups
   const [customers, setCustomers]     = useState<CustomerLookup[]>([]);
   const [masterSpecs, setMasterSpecs] = useState<MasterSpecLookup[]>([]);
+  const [variants, setVariants]       = useState<VariantLookup[]>([]);
+  const [loadingVariants, setLoadingVariants] = useState(false);
 
   // Load lookups once
   useEffect(() => {
     api.get<{ data: CustomerLookup[] }>('/protected/customers?limit=500').then(r => setCustomers(r.data)).catch(() => {});
     api.get<{ data: MasterSpecLookup[] }>('/protected/master-specs?limit=500').then(r => setMasterSpecs(r.data)).catch(() => {});
   }, []);
+
+  // Fetch variants when masterSpecId changes in the form
+  useEffect(() => {
+    if (!f.masterSpecId) { setVariants([]); return; }
+    setLoadingVariants(true);
+    api.get<{ id: number; variants: VariantLookup[] }>(`/protected/master-specs/${f.masterSpecId}`)
+      .then(r => setVariants(r.variants ?? []))
+      .catch(() => setVariants([]))
+      .finally(() => setLoadingVariants(false));
+  }, [f.masterSpecId]);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -113,6 +127,8 @@ export function CustomerItemsListPage() {
   async function save() {
     if (!f.name.trim())       { setSaveErr('Name is required'); return; }
     if (!f.customerId)        { setSaveErr('Customer is required'); return; }
+    if (!f.masterSpecId)      { setSaveErr('Master Spec is required'); return; }
+    if (!f.variantId)         { setSaveErr('Variant is required'); return; }
     setSaving(true); setSaveErr('');
     try {
       const body: Record<string, unknown> = {
@@ -120,7 +136,8 @@ export function CustomerItemsListPage() {
         customerId:      parseInt(f.customerId),
         code:            f.code.trim() ? f.code.trim().toUpperCase() : undefined,
         description:     f.description.trim() || null,
-        masterSpecId:    f.masterSpecId ? parseInt(f.masterSpecId) : null,
+        masterSpecId:    parseInt(f.masterSpecId),
+        variantId:       parseInt(f.variantId),
         listPrice:       f.listPrice ? parseFloat(f.listPrice) : null,
         fulfillmentPath: f.fulfillmentPath || null,
       };
@@ -183,14 +200,14 @@ export function CustomerItemsListPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
-              {['Code', 'Name', 'Customer', 'Master Spec', 'Fulfillment', 'Price', 'Status'].map(h => (
+              {['Code', 'Name', 'Customer', 'Master Spec', 'Variant', 'Fulfillment', 'Price', 'Status'].map(h => (
                 <th key={h} style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.72rem', fontWeight: 600, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items found.</td></tr>}
+            {loading && <tr><td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>Loading...</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, fontSize: '0.875rem' }}>No customer items found.</td></tr>}
             {!loading && rows.map(r => (
               <tr
                 key={r.id}
@@ -203,6 +220,7 @@ export function CustomerItemsListPage() {
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.85rem' }}>{r.name}</td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.customer.name}</td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.masterSpec ? r.masterSpec.name : '\u2014'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.82rem', color: c.textLabel }}>{r.variant?.sku ?? '\u2014'}</td>
                 <td style={{ padding: '0.75rem 1rem' }}>
                   {r.fulfillmentPath ? (
                     <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: 4, background: 'rgba(168,85,247,0.12)', color: '#c084fc' }}>{r.fulfillmentPath.replace(/_/g, ' ')}</span>
@@ -250,10 +268,16 @@ export function CustomerItemsListPage() {
               {customers.map(cu => <option key={cu.id} value={cu.id}>{cu.name}</option>)}
             </select>
           </Field>
-          <Field label="Master Spec">
-            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.masterSpecId} onChange={set('masterSpecId')}>
-              <option value="">-- None --</option>
+          <Field label="Master Spec *">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.masterSpecId} onChange={e => setF(prev => ({ ...prev, masterSpecId: e.target.value, variantId: '' }))}>
+              <option value="">-- Select master spec --</option>
               {masterSpecs.map(ms => <option key={ms.id} value={ms.id}>{ms.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Variant *">
+            <select style={{ ...inputStyle, cursor: 'pointer' }} value={f.variantId} onChange={set('variantId')} disabled={!f.masterSpecId || loadingVariants}>
+              <option value="">{!f.masterSpecId ? '-- Select master spec first --' : loadingVariants ? 'Loading...' : '-- Select variant --'}</option>
+              {variants.filter(v => v.isActive).map(v => <option key={v.id} value={v.id}>{v.sku}{v.variantDescription ? ` — ${v.variantDescription}` : ''}</option>)}
             </select>
           </Field>
           <Field label="List Price ($)">

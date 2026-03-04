@@ -59,8 +59,15 @@ router.get('/:id', async (req, res) => {
       customerItem: { select: { id: true, code: true, name: true } },
       masterSpec:   { select: { id: true, sku: true, name: true } },
       blankSpecs: {
-        include: { masterSpec: { select: { id: true, sku: true, name: true } } },
-        where:    { masterSpecId: { not: null } },
+        include: {
+          variant: {
+            select: {
+              id: true, sku: true, variantDescription: true,
+              masterSpec: { select: { id: true, sku: true, name: true } },
+            },
+          },
+        },
+        where: { variantId: { not: null } },
       },
     },
   });
