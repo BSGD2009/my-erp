@@ -8,10 +8,16 @@ const SIDEBAR_W = 220;
 
 const NAV_SECTIONS = [
   {
+    section: 'Sales',
+    items: [
+      { path: '/quotes',     label: 'Quotes' },
+      { path: '/prospects',  label: 'Prospects' },
+    ],
+  },
+  {
     section: 'Master Data',
     items: [
       { path: '/customers',          label: 'Customers' },
-      { path: '/prospects',          label: 'Prospects' },
       { path: '/suppliers',          label: 'Suppliers' },
       { path: '/locations',          label: 'Locations' },
       { path: '/parties',            label: 'Parties' },
@@ -43,11 +49,13 @@ const NAV_SECTIONS = [
   {
     section: 'Admin Settings',
     items: [
-      { path: '/admin/payment-terms',    label: 'Payment Terms' },
-      { path: '/admin/material-types',   label: 'Material Types' },
-      { path: '/admin/resource-types',   label: 'Resource Types' },
-      { path: '/admin/product-modules',  label: 'Product Modules' },
-      { path: '/admin/board-grades',    label: 'Board Grades' },
+      { path: '/admin/payment-terms',     label: 'Payment Terms' },
+      { path: '/admin/material-types',    label: 'Material Types' },
+      { path: '/admin/resource-types',    label: 'Resource Types' },
+      { path: '/admin/product-modules',   label: 'Product Modules' },
+      { path: '/admin/board-grades',      label: 'Board Grades' },
+      { path: '/admin/board-prices',      label: 'Board Prices' },
+      { path: '/admin/board-upcharges',   label: 'Board Upcharges' },
       { path: '/admin/blanket-contracts', label: 'Blanket Contracts' },
     ],
   },

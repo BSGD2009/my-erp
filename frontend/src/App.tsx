@@ -32,6 +32,10 @@ import { BoardGradesPage }           from './pages/BoardGradesPage';
 import { ProspectsListPage }         from './pages/ProspectsListPage';
 import { BlanketContractsListPage }  from './pages/BlanketContractsListPage';
 import { BlanketContractRecordPage } from './pages/BlanketContractRecordPage';
+import { QuotesListPage }           from './pages/QuotesListPage';
+import { QuoteRecordPage }          from './pages/QuoteRecordPage';
+import { BoardPricesPage }          from './pages/BoardPricesPage';
+import { BoardUpchargesPage }       from './pages/BoardUpchargesPage';
 
 function Protected({ children }: { children: React.ReactNode }) {
   return <ProtectedRoute>{children}</ProtectedRoute>;
@@ -45,8 +49,12 @@ export default function App() {
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Protected — master data */}
+          {/* Protected — sales */}
           <Route path="/dashboard"           element={<Protected><DashboardPage /></Protected>} />
+          <Route path="/quotes"              element={<Protected><QuotesListPage /></Protected>} />
+          <Route path="/quotes/:id"          element={<Protected><QuoteRecordPage /></Protected>} />
+
+          {/* Protected — master data */}
           <Route path="/customers"           element={<Protected><CustomersListPage /></Protected>} />
           <Route path="/customers/:id"       element={<Protected><CustomerRecordPage /></Protected>} />
           <Route path="/prospects"           element={<Protected><ProspectsListPage /></Protected>} />
@@ -82,6 +90,8 @@ export default function App() {
           <Route path="/admin/resource-types"    element={<Protected><ResourceTypesPage /></Protected>} />
           <Route path="/admin/product-modules"   element={<Protected><ProductModulesPage /></Protected>} />
           <Route path="/admin/board-grades"      element={<Protected><BoardGradesPage /></Protected>} />
+          <Route path="/admin/board-prices"     element={<Protected><BoardPricesPage /></Protected>} />
+          <Route path="/admin/board-upcharges"  element={<Protected><BoardUpchargesPage /></Protected>} />
           <Route path="/admin/blanket-contracts" element={<Protected><BlanketContractsListPage /></Protected>} />
           <Route path="/admin/blanket-contracts/:id" element={<Protected><BlanketContractRecordPage /></Protected>} />
 

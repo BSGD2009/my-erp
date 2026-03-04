@@ -24,6 +24,9 @@ import productModulesRouter    from './routes/productModules';
 import boardGradesRouter       from './routes/boardGrades';
 import partiesRouter           from './routes/parties';
 import blanketContractsRouter  from './routes/blanketContracts';
+import boardPricesRouter       from './routes/boardPrices';
+import boardUpchargesRouter    from './routes/boardUpcharges';
+import quotesRouter            from './routes/quotes';
 
 dotenv.config();
 
@@ -72,6 +75,9 @@ app.use('/api/protected/inventory',          inventoryRouter);
 app.use('/api/protected/resources',          resourcesRouter);
 app.use('/api/protected/operations',         operationsRouter);
 
+// Sales
+app.use('/api/protected/quotes',             quotesRouter);
+
 // Admin lookups
 app.use('/api/protected/payment-terms',      paymentTermsRouter);
 app.use('/api/protected/material-types',     materialTypesRouter);
@@ -79,6 +85,8 @@ app.use('/api/protected/resource-types',     resourceTypesRouter);
 app.use('/api/protected/product-modules',    productModulesRouter);
 app.use('/api/protected/board-grades',       boardGradesRouter);
 app.use('/api/protected/blanket-contracts', blanketContractsRouter);
+app.use('/api/protected/board-prices',      boardPricesRouter);
+app.use('/api/protected/board-upcharges',   boardUpchargesRouter);
 
 // ── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {

@@ -1,5 +1,5 @@
-// BoxERP — Prisma Schema v9
-// Pre-Session 5: Intelligence fields, blanket contracts, print plate status
+// BoxERP — Prisma Schema v10
+// Session 5: Quote builder, BoardPrice/BoardUpcharge, pricing engine
 //   - Party model (Party, PartyRole, PartyContact) — unified contacts
 //   - Unified Location (partyId, replaces ShipToAddress)
 //   - Resource model (replaces WorkCenter + Equipment)
@@ -289,6 +289,32 @@ enum BlanketContractStatus {
   RENEGOTIATING
 }
 
+enum UpchargeType {
+  E_FLUTE
+  BE_FLUTE
+  WHITE_TOP_31
+  WHITE_TOP_42
+  WHITE_TOP_69
+  KRAFT_MCH
+  M33
+  M36
+  NARROW_WIDTH
+  SHORT_CUT_25
+  SHORT_CUT_29
+  TELE_TWIN_SCORING
+  FLAT_SCORES
+  REVERSE_SCORES
+  WRA_SW
+  WRA_DW
+  STOP_CHARGE
+  OTHER
+}
+
+enum ChargeType {
+  PER_MSF
+  FLAT_SETUP
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LOOKUP / ADMIN TABLES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,6 +379,54 @@ model BoardGrade {
 
   variants   ProductVariant[]
   quoteItems QuoteItem[]
+  boardPrices BoardPrice[]
+}
+
+model BoardPrice {
+  id                 Int       @id @default(autoincrement())
+  supplierId         Int
+  deliveryLocationId Int?
+  boardGradeId       Int
+  flute              String?
+  tier1MaxMsf        Decimal   @db.Decimal(10, 2)
+  tier1Price         Decimal   @db.Decimal(12, 4)
+  tier2MaxMsf        Decimal   @db.Decimal(10, 2)
+  tier2Price         Decimal   @db.Decimal(12, 4)
+  tier3MaxMsf        Decimal   @db.Decimal(10, 2)
+  tier3Price         Decimal   @db.Decimal(12, 4)
+  tier4Price         Decimal   @db.Decimal(12, 4)
+  effectiveDate      DateTime
+  expiryDate         DateTime?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  supplier         Supplier   @relation(fields: [supplierId], references: [id])
+  deliveryLocation Location?  @relation(fields: [deliveryLocationId], references: [id])
+  boardGrade       BoardGrade @relation(fields: [boardGradeId], references: [id])
+
+  @@index([supplierId])
+  @@index([boardGradeId])
+  @@index([deliveryLocationId])
+}
+
+model BoardUpcharge {
+  id            Int           @id @default(autoincrement())
+  supplierId    Int
+  upchargeType  UpchargeType
+  chargeType    ChargeType
+  amount        Decimal       @db.Decimal(12, 4)
+  condition     String?
+  minMsf        Decimal?      @db.Decimal(10, 2)
+  effectiveDate DateTime
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+  @@index([upchargeType])
 }
 
 model ModuleSpecField {
@@ -489,6 +563,7 @@ model Location {
   resources              Resource[]
   inventoryCommitments   InventoryCommitment[]
   blankSpecOverrides     BlankSpecLocationOverride[]
+  boardPrices            BoardPrice[]
 
   @@index([partyId])
 }
@@ -574,6 +649,8 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
   resources      Resource[]
   quoteItems     QuoteItem[]
+  boardPrices    BoardPrice[]
+  boardUpcharges BoardUpcharge[]
 
   @@index([partyId])
 }
